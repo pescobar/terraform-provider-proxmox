@@ -1,0 +1,12 @@
+This project is a fork of
+
+    https://github.com/Telmate/terraform-provider-proxmox
+
+taken at tag v3.0.1-rc5.
+
+It is distributed under the MIT License, the same licence as the original. The
+first copyright line in LICENSE is upstream's, retained verbatim as the licence
+requires; the second covers modifications made in this fork.
+
+Upstream left the holder of the first line as the literal placeholder
+"<copyright holders>". It is reproduced unchanged rather than guessed at.

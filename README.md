@@ -11,6 +11,9 @@ containers on the [Proxmox virtualization platform](https://pve.proxmox.com/pve-
 > [upstream](https://github.com/Telmate/terraform-provider-proxmox) or
 > [bpg/proxmox](https://github.com/bpg/terraform-provider-proxmox) instead.
 
+Licensed MIT, as upstream is. See `LICENSE` for the terms and `NOTICE` for the
+fork's provenance.
+
 ## Why this fork exists
 
 Our deployments were pinned to upstream `v3.0.1-rc5`, and there was no
