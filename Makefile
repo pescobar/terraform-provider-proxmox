@@ -98,3 +98,21 @@ local-dev-install: build
 
 clean:
 	@git clean -f -d
+
+# --- local acceptance test environment (see test/acceptance/README.md) ---
+
+.PHONY: testenv-build testenv-up testenv-down acctest-local
+
+testenv-build: # build the throwaway Proxmox VE image
+	@./test/acceptance/scripts/build-image.sh
+
+testenv-up: # boot the throwaway Proxmox VE image and wait for its API
+	@./test/acceptance/scripts/start.sh
+
+testenv-down: # kill the throwaway Proxmox VE VM
+	@./test/acceptance/scripts/stop.sh
+
+# Same as `acctest` but points at the local test VM. It deliberately does not
+# depend on `build` (and therefore not on `clean`, which runs `git clean -f -d`).
+acctest-local: testenv-up
+	@. ./test/acceptance/scripts/env.sh; TF_ACC=1 go test ./proxmox $(TESTARGS)

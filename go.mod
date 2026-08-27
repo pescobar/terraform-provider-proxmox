@@ -1,4 +1,4 @@
-module github.com/Telmate/terraform-provider-proxmox/v2
+module github.com/pescobar/terraform-provider-proxmox
 
 go 1.21
 

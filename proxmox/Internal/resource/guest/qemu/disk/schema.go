@@ -4,7 +4,7 @@ import (
 	"regexp"
 
 	pveAPI "github.com/Telmate/proxmox-api-go/proxmox"
-	errorMSG "github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/errormsg"
+	errorMSG "github.com/pescobar/terraform-provider-proxmox/proxmox/Internal/errormsg"
 
 	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"

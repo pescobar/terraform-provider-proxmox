@@ -1,0 +1,189 @@
+name: Acceptance tests
+
+# Acceptance tests create and destroy real VMs, so they never run automatically
+# on pull requests.  Trigger them by hand, or let the nightly schedule run them
+# on master (which also keeps the cached images from being evicted).
+on:
+  workflow_dispatch:
+    inputs:
+      pve_version:
+        description: 'Proxmox VE version to test against'
+        type: choice
+        required: false
+        default: '8.4'
+        options: ['8.4', '9.2', 'both']
+      testargs:
+        description: 'go test arguments. Defaults to a pattern that matches nothing, because the inherited acceptance tests cannot pass (see README).'
+        required: false
+        default: '-run=TestAccNothingYet'
+      force_rebuild:
+        description: 'Rebuild the Proxmox VE image instead of using the cached one'
+        type: boolean
+        required: false
+        default: false
+  # Nightly, mostly to keep the cached images alive: GitHub evicts caches that
+  # go unused for 7 days, and rebuilding both images costs ~20 minutes against
+  # ~6 for a run that restores them.
+  schedule:
+    - cron: '0 3 * * *'
+
+  # Fork pull requests are gated by the repository's "require approval for
+  # first-time contributors" setting, so an unknown contributor's PR waits for
+  # a human before it boots anything.  Fork PRs also get a read-only token and
+  # no secrets; this workflow needs neither.
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/disabled-upstream/**'
+
+# One run per pull request: a force-push cancels the superseded run instead of
+# leaving two sets of VMs booting.  Scheduled and manual runs get a group of
+# their own so they are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GO_VERSION: '1.26'
+  # Bump to invalidate the cached Proxmox images on purpose.
+  IMAGE_CACHE_EPOCH: '2'
+
+jobs:
+  acctest:
+    # Production is on Proxmox 8 (8.4 is the final 8.x release) and the target
+    # is Proxmox 9 (9.2 is current), so both are tested.  The interesting
+    # signal is anything that passes on one and fails on the other.
+    # The matrix is computed rather than filtered, because a job level `if:`
+    # cannot see the matrix context.  An empty input (scheduled runs) is both.
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(
+          github.event.inputs.pve_version == '8.4' && '[{"pve_major":"8","pve_version":"8.4"}]'
+          || github.event.inputs.pve_version == '9.2' && '[{"pve_major":"9","pve_version":"9.2"}]'
+          || github.event.inputs.pve_version == 'both' && '[{"pve_major":"8","pve_version":"8.4"},{"pve_major":"9","pve_version":"9.2"}]'
+          || '[{"pve_major":"8","pve_version":"8.4"}]') }}
+    name: Proxmox VE ${{ matrix.pve_version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      PVE_TEST_PVE_VERSION: ${{ matrix.pve_major }}
+      PVE_TEST_EXPECT_VERSION: ${{ matrix.pve_version }}
+      # Build on /mnt: the runner's root volume is too small for an
+      # uncompressed image plus the work image it is converted from.
+      PVE_TEST_BUILD_DIR: /mnt/pve-test-build
+      IMAGE_PATH: /mnt/pve-test-build/proxmox-ve-${{ matrix.pve_major }}-test.qcow2
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+
+      - name: Set up OpenTofu
+        # Production runs OpenTofu, so the acceptance tests drive the same CLI.
+        # provider_acceptance_tests exports TF_ACC, TF_ACC_TERRAFORM_PATH,
+        # TF_ACC_PROVIDER_HOST and TF_ACC_PROVIDER_NAMESPACE.  SDK v2 honours
+        # all four: helper/resource keys TF_REATTACH_PROVIDERS as
+        # host/namespace/name, so they have to say registry.opentofu.org for
+        # tofu to resolve the in-process provider instead of trying to download
+        # it.  The wrapper script confuses the test framework, hence false.
+        uses: opentofu/setup-opentofu@v2
+        with:
+          tofu_wrapper: false
+          provider_acceptance_tests: true
+          cache: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils xorriso
+
+      - name: Prepare the build directory
+        run: |
+          sudo mkdir -p "$PVE_TEST_BUILD_DIR"
+          sudo chown "$(id -u):$(id -g)" "$PVE_TEST_BUILD_DIR"
+          df -h / /mnt
+
+      - name: Enable KVM for the runner user
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+          # The guests the tests create run one level deeper again, so the
+          # runner has to hand nested virtualisation down to the Proxmox VM.
+          grep -o -m1 -E 'vmx|svm' /proc/cpuinfo || echo "WARNING: no hardware virtualisation flags on this runner"
+          cat /sys/module/kvm_intel/parameters/nested 2>/dev/null \
+            || cat /sys/module/kvm_amd/parameters/nested 2>/dev/null \
+            || echo "WARNING: nested virtualisation state unknown"
+
+      # Restore and save are split on purpose.  actions/cache only saves in its
+      # post step when the job succeeded, and these runs are expected to fail
+      # while the fork is being sorted out.  Without the explicit save below,
+      # a failing run would rebuild Proxmox from scratch every single time.
+      - name: Restore the Proxmox VE image
+        id: image-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.IMAGE_PATH }}
+          key: pve${{ matrix.pve_version }}-image-${{ env.IMAGE_CACHE_EPOCH }}-${{ hashFiles('test/acceptance/guest/*.sh', 'test/acceptance/scripts/common.sh', 'test/acceptance/scripts/build-image.sh') }}
+
+      - name: Build the Proxmox VE image
+        id: build-image
+        if: steps.image-cache.outputs.cache-hit != 'true' || inputs.force_rebuild
+        env:
+          PVE_TEST_FORCE_REBUILD: ${{ inputs.force_rebuild && '1' || '0' }}
+        run: ./test/acceptance/scripts/build-image.sh
+
+      - name: Save the Proxmox VE image
+        # Runs even when a later step fails, so the expensive part is paid once.
+        if: always() && steps.build-image.outcome == 'success' && steps.image-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.IMAGE_PATH }}
+          key: ${{ steps.image-cache.outputs.cache-primary-key }}
+
+      - name: Start Proxmox VE
+        run: ./test/acceptance/scripts/start.sh
+
+      # The question this whole workflow exists to answer: can a VM be booted
+      # in here at all?  No terraform, no provider, just the Proxmox API.
+      - name: Boot a VM (hypervisor level)
+        run: ./test/acceptance/scripts/smoke-boot-vm.sh
+
+      # And the same thing again through the provider.
+      - name: Boot a VM (through the provider, driven by OpenTofu)
+        env:
+          PM_API_URL: https://127.0.0.1:8006/api2/json
+          PM_USER: root@pam
+          PM_PASS: proxmox-acctest
+          PM_TLS_INSECURE: 'true'
+        run: make acctest TESTARGS="-v -timeout 60m ${{ inputs.testargs || '-run=TestAccNothingYet' }}"
+
+      - name: Collect logs
+        if: always()
+        run: |
+          mkdir -p /tmp/acctest-logs
+          cp acctest.log /tmp/acctest-logs/ 2>/dev/null || true
+          cp ../acctest.log /tmp/acctest-logs/ 2>/dev/null || true
+          cp "$PVE_TEST_BUILD_DIR"/*.log /tmp/acctest-logs/ 2>/dev/null || true
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: acceptance-test-logs-pve${{ matrix.pve_version }}
+          path: /tmp/acctest-logs
+          if-no-files-found: ignore
+
+      - name: Stop Proxmox VE
+        if: always()
+        run: ./test/acceptance/scripts/stop.sh

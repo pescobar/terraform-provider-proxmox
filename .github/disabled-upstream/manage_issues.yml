@@ -1,0 +1,24 @@
+name: Close inactive issues
+on:
+  schedule:
+    - cron: "00 11 * * *"
+
+jobs:
+  close-issues:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/stale@v9
+        with:
+          days-before-issue-stale: 60
+          days-before-issue-close: 5
+          stale-issue-label: "stale"
+          stale-issue-message: "This issue is stale because it has been open for 60 days with no activity. Please update the provider to the latest version and, in the issue persist, provide full configuration and debug logs"
+          close-issue-message: "This issue was closed because it has been inactive for 5 days since being marked as stale."
+          days-before-pr-stale: -1
+          days-before-pr-close: -1
+          exempt-all-assignees: true
+          exempt-issue-labels: 'community feedback,dependencies,good first issue,help wanted,issue/confirmed,issue/critical,issue/investigate,issue/regression,issue/workaround,modifies/dependencies,modifies/docs,modifies/go,proposal/accepted,proposal/pending,proposal/rejected,release,resource/cloud-init,resource/lxc,resource/pool,resource/qemu,type/bug,type/documentation,type/enhancement,type/feature,type/miscellaneous,type/question,type/refactoring,type/summary,type/testing,type/upstream,type/workflow'
+          exempt-pr-labels: 'community feedback,dependencies,good first issue,help wanted,issue/confirmed,issue/critical,issue/investigate,issue/regression,issue/workaround,modifies/dependencies,modifies/docs,modifies/go,proposal/accepted,proposal/pending,proposal/rejected,release,resource/cloud-init,resource/lxc,resource/pool,resource/qemu,type/bug,type/documentation,type/enhancement,type/feature,type/miscellaneous,type/question,type/refactoring,type/summary,type/testing,type/upstream,type/workflow'

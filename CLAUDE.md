@@ -1,0 +1,329 @@
+# CLAUDE.md
+
+Working notes for this fork of
+[Telmate/terraform-provider-proxmox](https://github.com/telmate/terraform-provider-proxmox).
+
+## The plan
+
+Production runs **Telmate/proxmox `v3.0.1-rc5`** (tagged 2024-11-24) with
+**OpenTofu**, against a **Proxmox VE 8** cluster that is going to be upgraded
+to **Proxmox VE 9**.
+
+Upstream is not a viable upgrade path: between `v3.0.1-rc5` and the current
+`v3.0.2-rc09` there are 191 commits touching `proxmox/` across 171 files
+(+8359/-2580) and a string of breaking schema changes spread over 21 months, in
+a chain of release candidates. Upgrading through that is the problem we are
+trying to avoid, not something to solve on the way.
+
+So the plan is deliberately narrow:
+
+1. **Fork at `v3.0.1-rc5` exactly**, not at upstream HEAD. Same code,
+   different provider address.
+2. Move production state onto the fork. Because the code is identical, this is
+   a provider rename and nothing else.
+3. Only then, backport from upstream selectively, on our own schedule, with a
+   real upgrade path per change.
+
+What we are buying is control over *when* breaking changes land, not new
+features.
+
+## Status
+
+### Done: the baseline branch (`fork-base`, from `v3.0.1-rc5`)
+
+Branched from the tag, with the CI tooling carried over from the HEAD-based
+branch. Changes on top of rc5, all of them mechanical:
+
+* Go module renamed `github.com/Telmate/terraform-provider-proxmox/v2` ->
+  `github.com/pescobar/terraform-provider-proxmox`, 23 references across 13
+  files. Dropping `/v2` also fixes an upstream inconsistency: the module
+  carried a `/v2` suffix while the tags said `v3.x`.
+* `main.go` debug registry address -> `registry.opentofu.org/pescobar/proxmox`.
+* `go.yml` un-parked, targeting `main`, actions on Node 24 majors.
+* `release.yml` un-parked, ready for `GPG_PRIVATE_KEY` / `PASSPHRASE`.
+* LICENSE keeps upstream's MIT notice verbatim and adds ours, as MIT requires.
+* README explains what this fork is and why it exists.
+* The acceptance workflow defaults to Proxmox 8.4 only, and its default
+  `testargs` matches nothing, because the inherited tests cannot pass.
+
+**Not verified locally: there is no Go toolchain on the machine this was built
+on, so the module rename has never been compiled.** `go.yml` on the first push
+is what proves it. If it fails, it will be an import path typo, nothing subtle.
+
+Version numbering: publish `0.9.x` for the migration rehearsal, then `1.0.0`
+from the same commit as the last `0.9.x` once the rehearsal passes. Do **not**
+reuse upstream's `v3.0.1-rc5` string: `-rc5` is a prerelease, which ordinary
+version constraints refuse to match, and the same string would mean two
+different artifacts.
+
+### Blocker found: `v3.0.1-rc5` cannot talk to Proxmox VE 9 at all
+
+Proxmox 9 **removed the `VM.Monitor` privilege** (it was replaced by
+`Sys.Audit` for monitor access, and `VM.GuestAgent` for agent operations).
+`v3.0.1-rc5` has the minimum permission list hardcoded in
+`proxmox/provider.go` (~line 234) and it includes `VM.Monitor`. When a required
+privilege is missing the provider does not warn, it fails configuration:
+
+```
+permissions for user/token root@pam are not sufficient, please provide also the
+following permissions that are missing: [VM.Monitor]
+```
+
+This hits **every user including `root@pam`**, because on Proxmox 9 the
+privilege does not exist and therefore cannot be granted. Upstream fixed it in
+`v3.0.2-rc04` by deleting one line
+(`e5c9963`), and separately added `Pool.Audit`
+(`9ae1698`). Those are the *only* two Proxmox-9-specific commits in the entire
+range between rc5 and HEAD.
+
+**First backport, and it is one line:** remove `"VM.Monitor"` from
+`minimumPermissions`. Worth also backporting the later
+`pm_minimum_permission_check` / `pm_minimum_permission_list` provider
+arguments, which exist at HEAD but not at rc5, so a future privilege rename
+becomes configuration rather than a code change.
+
+Whether anything *else* breaks on Proxmox 9 is unknown, and that is what the
+test environment below is for.
+
+### Done: acceptance test environment (2026-08-27)
+
+The acceptance tests are not mocked, they drive a real Proxmox VE API.
+`test/acceptance/` builds a throwaway single node Proxmox VE host inside QEMU,
+for **Proxmox 8.4 or 9.2**, so the same suite can be run against the version
+production is on and the version it is moving to.
+
+```
+test/acceptance/scripts/build-image.sh    Debian cloud image -> Proxmox VE qcow2
+test/acceptance/scripts/start.sh          boot it on a fresh overlay, wait for readiness
+test/acceptance/scripts/stop.sh           kill it, drop the overlay
+test/acceptance/scripts/wait-ready.sh     probe: API auth -> node online -> fixtures
+test/acceptance/scripts/smoke-boot-vm.sh  create, boot and destroy a VM over the API
+test/acceptance/scripts/env.sh            PM_* variables for the local VM
+test/acceptance/scripts/common.sh         all settings, overridable via PVE_TEST_*
+test/acceptance/guest/                    scripts that run inside the VM
+test/acceptance/README.md                 full documentation
+.github/workflows/acceptance-test.yml     matrix over 8.4 and 9.2, images cached
+```
+
+```bash
+make testenv-build                            # Proxmox 9.2 image
+PVE_TEST_PVE_VERSION=8 make testenv-build     # Proxmox 8.4 image
+make acctest-local TESTARGS='-v'
+```
+
+**Current scope is deliberately one question: can a VM be booted in CI?** The
+workflow runs a hypervisor level boot test (`smoke-boot-vm.sh`, straight at the
+API, no terraform) followed by a single provider level one
+(`TestAccProxmoxVmQemu_BasicCreate`). Widening to the full suite is a
+`testargs` input away, once booting is proven.
+
+**It applies unchanged to the rc5 fork:** `proxmox/resource_vm_qemu_test.go`
+and `proxmox/provider_test.go` are byte-identical between `v3.0.1-rc5` and
+HEAD, so the environment works on the rc5 branch as-is.
+
+**The infrastructure question is settled (run 33081184369, 2026-08-27).**
+GitHub hosted runners boot VMs three levels deep, on both target versions:
+
+```
+Proxmox VE 8.4.21:  PASS: boots VMs with hardware acceleration (kvm=1)
+Proxmox VE 9.2.11:  PASS: boots VMs with hardware acceleration (kvm=1)
+```
+
+`kvm=1`, not the TCG fallback, so the acceptance tests need no `kvm = false`
+workaround. Runners provide `/dev/kvm`, AMD `svm` and `kvm_amd nested=1`.
+Images build, cache, restore and boot on both versions; the whole loop works
+on standard runners, with no self hosted runner required.
+
+Seven rounds of environment bugs were fixed getting there, each a different
+layer: `grub-pc` prompting for an install disk (Debian 13 only), a compressed
+qcow2 making first boot take ten minutes, the runner's root volume being too
+small, fixtures never created because their unit was ordered behind
+`pveproxy.service` (whose start job never completes), waiting for a
+`storage.cfg` that PVE does not write until first boot, `set -o pipefail`
+killing the boot test on a `grep` that matched nothing, and `vmbr0` living in
+an `interfaces.d/` nobody sources. The pattern worth keeping: every fixture is
+now verified inside the guest before the image is allowed into the cache.
+
+**The upstream acceptance tests are dead code.** The provider level step fails
+on the fixtures, not the environment:
+
+```
+Error: Unsupported argument
+   6:   iso = "local:iso/SpinRite.iso"
+An argument named "iso" is not expected here.
+```
+
+The top level `iso` argument was removed in `2808e32` ("Remove `ISO` setting
+and unlock `ide2`", 2024-02-23), which is an ancestor of `v3.0.1-rc5`, tagged
+274 days later. So these fixtures cannot pass at HEAD *or* at rc5, and the
+repo ships no acceptance workflow. Upstream has not run this suite in over two
+years. Note this revises an earlier observation: the test files being byte
+identical between rc5 and HEAD means identically *stale*, not portable.
+
+**Decision: write new acceptance tests in the fork.** The old ones are a
+reference for what to cover, not something to port. Fixing them would preserve
+two year old assumptions nobody has validated.
+
+**Verification status.** The host side was smoke tested end to end with stubbed
+`qemu`/`curl` for both Proxmox versions, including all four outcomes of the
+boot test (KVM works / only TCG works / version drift / cannot boot). The
+workflow is actionlint clean. The guest side (the actual Proxmox install) has
+**not** been run yet: no `/dev/kvm` and no access to `download.proxmox.com` on
+the machine it was written on. The first CI run is the real test.
+
+**Known risk: three levels of virtualisation.** The provider defaults
+`kvm = true` and `power_state = running`, so the tests really boot guests,
+inside the Proxmox VM, inside the runner. `smoke-boot-vm.sh` exists to tell
+that apart from everything else: it retries with `kvm=0` and reports which
+mode worked, so a failure says whether the runner cannot nest or the
+environment is broken.
+
+**Image reuse.** Building Proxmox takes ~10 minutes; after the first run the
+image comes from the Actions cache and the job just boots it (~6 minutes for
+the whole matrix instead of ~20). Restore and save are separate steps with
+`if: always()`, because `actions/cache` does not save when a job fails, and
+failing runs are expected here.
+
+**Watch the cache total: the images are big and the limit is 10GB.** Each
+image is 2-3GB, so one pair fills half the repository's cache allowance. The
+cache key is a content hash of `guest/*.sh`, `scripts/common.sh` and
+`scripts/build-image.sh`, so **every edit to any of those mints a new key and
+orphans the previous pair, ~5GB at a time**. Nothing reclaims the old entries
+automatically until GitHub starts evicting, and it evicts least-recently-used,
+which can take the images with it.
+
+This bit us on 2026-08-27: four images, 11.27GB, over the limit and evicting.
+Check and prune after a run of provisioning changes:
+
+```bash
+gh api repos/<owner>/<repo>/actions/cache/usage
+gh api repos/<owner>/<repo>/actions/caches --jq \
+    '.actions_caches[] | "\(.id) \(.size_in_bytes/1e9|floor)GB \(.key)"'
+gh api -X DELETE repos/<owner>/<repo>/actions/caches/<id>
+```
+
+Entries whose hash suffix does not match the current scripts can never be hit
+again; they are only crowding the limit. To find the current suffix, hash the
+same files the workflow does, in the same order.
+
+### Next
+
+1. Branch from `v3.0.1-rc5` (`git checkout -b main v3.0.1-rc5`, upstream kept
+   as a remote for cherry picking).
+2. Backport the one line that removes `VM.Monitor` from `minimumPermissions`,
+   without which rc5 cannot talk to Proxmox 9 at all. Consider also
+   backporting `pm_minimum_permission_check` / `pm_minimum_permission_list`.
+3. Write new acceptance tests against the rc5 schema, using
+   `proxmox/resource_vm_qemu_test.go` for coverage ideas only. The CI
+   environment carries over unchanged: node `testproxmox`, `local` accepting
+   images, `local:iso/SpinRite.iso`, `vmbr0`.
+4. Point the workflow's default `testargs` at the new tests once they exist.
+5. Rehearse the state migration on a copy of a production state file.
+
+## Provider migration (Telmate -> fork), with OpenTofu
+
+Supported, and forking at rc5 makes it as safe as it can be: the schema is
+identical, so nothing but the provider address changes.
+
+**A. New namespace, rewrite state.** State records each resource's provider as
+a fully qualified address, e.g.
+`provider["registry.opentofu.org/telmate/proxmox"]`. Change `source` in
+`required_providers`, then:
+
+```bash
+tofu state pull > backup.tfstate         # the command backs up too, but still
+tofu state replace-provider \
+    registry.opentofu.org/telmate/proxmox \
+    registry.opentofu.org/<namespace>/proxmox
+rm .terraform.lock.hcl && tofu init -upgrade
+tofu plan                                # must be empty
+```
+
+Check the exact FROM address inside the state file first: state written by
+Terraform says `registry.terraform.io/...`, state written by OpenTofu says
+`registry.opentofu.org/...`.
+
+**B. Keep the address, swap the binary.** Leave `source` as `telmate/proxmox`
+and serve the fork through a filesystem or network mirror
+(`provider_installation` in the CLI config). No state rewrite at all, but the
+fork cannot be published to a registry under someone else's namespace, so this
+is internal distribution only. Reasonable as a first step, and it keeps
+option A available later.
+
+Either way an empty `tofu plan` after the switch is the acceptance criterion.
+
+## Facts about the codebase (verified at `ab9dbfa`, not assumed)
+
+* **No state versioning anywhere.** No `SchemaVersion`, no `StateUpgraders`, no
+  `MigrateState` in the entire provider, at rc5 or at HEAD. Every resource is
+  schema version 0. That is *why* upstream upgrades are so painful: breaking
+  schema changes shipped with no migration path. Any breaking change we make in
+  the fork must bring its own `SchemaVersion` + `StateUpgraders`, which is the
+  main thing the fork can do better than upstream.
+* The acceptance tests hardcode the node name `testproxmox`
+  (`testAccProxmoxTargetNode`) and expect `local` storage to accept disk
+  images, a `local:iso/SpinRite.iso` and a `vmbr0` bridge.
+* `main.go` hardcodes `registry.terraform.io/telmate/proxmox` as the default
+  `-registry` flag for debug mode; the fork needs to change it.
+* `make clean` is `git clean -f -d`, and `build` depends on it. Untracked files
+  are deleted by `make build` / `make acctest`. Commit before running those.
+  `make acctest-local` deliberately avoids that chain.
+* Release tooling already exists: `.goreleaser.yml` plus
+  `.github/workflows/release.yml`, GPG signed, on `v*` tags. That is most of
+  what a registry publication needs.
+* **The acceptance harness runs under OpenTofu, not Terraform.** CI uses
+  `opentofu/setup-opentofu@v2` with `provider_acceptance_tests: true`, which
+  exports `TF_ACC`, `TF_ACC_TERRAFORM_PATH`, `TF_ACC_PROVIDER_HOST` and
+  `TF_ACC_PROVIDER_NAMESPACE`. SDK v2.40.1 honours all four:
+  `internal/plugintest` uses `TF_ACC_TERRAFORM_PATH` as an exact CLI source,
+  and `helper/resource` keys `TF_REATTACH_PROVIDERS` as `host/namespace/name`,
+  defaulting to `registry.terraform.io`. That default is why the host matters:
+  `tofu` resolves a bare `proxmox` provider to
+  `registry.opentofu.org/hashicorp/proxmox`, so without the override it would
+  try to download the provider instead of using the in-process one.
+  To run the same tests under Terraform, swap the step for
+  `hashicorp/setup-terraform` with `terraform_wrapper: false`.
+
+## Upstream automation is parked, not deleted
+
+`.github/workflows/` contains **only** `acceptance-test.yml`. Everything
+inherited from upstream lives in `.github/disabled-upstream/`, which GitHub
+does not scan: `go.yml`, `release.yml`, `manage_issues.yml` and
+`dependabot.yml`. See the README there for what each one did and why it is off.
+
+This is deliberate. `release.yml` triggers on `v*` tags and would fire once per
+upstream tag (51 of them) and fail without the GPG secrets; `dependabot.yml`
+would start moving dependencies, which is precisely what the fork exists to
+control. `go.yml` (build, vet, staticcheck, unit tests) is the one worth
+adopting, once the fork's branch naming is settled.
+
+The nightly schedule on `acceptance-test.yml` is enabled. It mainly keeps the
+cached images from being evicted after 7 days of disuse: a run that restores
+them takes ~6 minutes of runner time for the whole matrix, one that rebuilds
+both takes ~20.
+
+Pull requests run the workflow too, gated by the repository setting
+**Settings -> Actions -> General -> "Require approval for first-time
+contributors"**, which is a repository setting rather than anything in the
+workflow file, and applies to fork pull requests on a public repository. Fork
+PRs also get a read-only token and no secrets; this workflow needs neither.
+A `concurrency` group cancels a superseded PR run rather than booting two sets
+of VMs, while scheduled and manual runs are never cancelled.
+
+**This repository is intended to be made public once it is ready.** Two things
+change when it is: GitHub-hosted runner minutes stop counting against a quota
+entirely, and scheduled workflows get disabled automatically after 60 days
+without repository activity. Nothing in the workflow needs to change for the
+switch. The `PM_PASS` in it is deliberate, not a leaked secret: it is the root
+password of a throwaway VM that only ever listens on the runner's loopback.
+
+## Conventions
+
+* Fork base is `v3.0.1-rc5`. Every deviation from it should be a small, single
+  purpose commit that says what it backports and why, so the delta stays
+  auditable.
+* Breaking schema changes require `SchemaVersion` + `StateUpgraders`. No
+  exceptions; this is the reason the fork exists.
+* New tooling lives in `test/`, not in `proxmox/`, to keep the diff against
+  upstream legible.
+* `test/acceptance/.build/` is git ignored: downloads, images and console logs.

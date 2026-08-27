@@ -8,8 +8,8 @@ import (
 	"time"
 
 	pxapi "github.com/Telmate/proxmox-api-go/proxmox"
-	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/pxapi/guest/tags"
-	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/util"
+	"github.com/pescobar/terraform-provider-proxmox/proxmox/Internal/pxapi/guest/tags"
+	"github.com/pescobar/terraform-provider-proxmox/proxmox/Internal/util"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 

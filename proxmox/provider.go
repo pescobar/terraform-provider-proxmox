@@ -11,7 +11,7 @@ import (
 	"sync"
 
 	pxapi "github.com/Telmate/proxmox-api-go/proxmox"
-	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/validator"
+	"github.com/pescobar/terraform-provider-proxmox/proxmox/Internal/validator"
 	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"

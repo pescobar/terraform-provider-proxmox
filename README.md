@@ -1,10 +1,36 @@
-[![Build Status](https://travis-ci.com/Telmate/terraform-provider-proxmox.svg?branch=master)](https://travis-ci.com/Telmate/terraform-provider-proxmox)
+# Terraform / OpenTofu provider for Proxmox — personal fork
 
-# Terraform provider plugin for Proxmox
+A fork of [Telmate/terraform-provider-proxmox](https://github.com/Telmate/terraform-provider-proxmox),
+branched at **`v3.0.1-rc5`**, exposing resources to provision QEMU VMs and LXC
+containers on the [Proxmox virtualization platform](https://pve.proxmox.com/pve-docs/).
 
-This repository provides a Terraform provider for
-the [Proxmox virtualization platform](https://pve.proxmox.com/pve-docs/) and exposes Terraform resources to provision
-QEMU VMs and LXC Containers.
+> **This is an unsupported personal fork.** It is published so that one set of
+> deployments can install it; it carries no support, no compatibility promise
+> and no release schedule. If you found it while looking for a Proxmox
+> provider, you almost certainly want
+> [upstream](https://github.com/Telmate/terraform-provider-proxmox) or
+> [bpg/proxmox](https://github.com/bpg/terraform-provider-proxmox) instead.
+
+## Why this fork exists
+
+Our deployments were pinned to upstream `v3.0.1-rc5`, and there was no
+practical way to move off it. Upstream shipped a long chain of release
+candidates containing breaking schema changes, and the provider defines no
+`SchemaVersion` and no `StateUpgraders` anywhere — so nothing migrates existing
+state automatically, and every upgrade risks a state file that no longer
+matches the schema that wrote it.
+
+Forking at the exact version already in production makes the switch a provider
+rename and nothing more: identical schema, identical state. From there,
+upstream changes can be adopted deliberately, one at a time, each with a tested
+upgrade path for existing state.
+
+Upstream's acceptance tests are not run here as-is: their fixtures set a
+top-level `iso` argument that was removed from the schema in February 2024,
+274 days before `v3.0.1-rc5` was tagged, so they cannot pass at this or any
+later version. New tests are being written instead. See `CLAUDE.md` for the
+current state of that work, and `test/acceptance/` for the CI environment that
+runs them against real Proxmox 8.4 and 9.2 hosts.
 
 ## Getting Started
 

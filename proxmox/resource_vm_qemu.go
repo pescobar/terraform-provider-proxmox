@@ -25,16 +25,16 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 
-	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/pxapi/dns/nameservers"
-	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/pxapi/guest/sshkeys"
-	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/pxapi/guest/tags"
-	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/qemu/cpu"
-	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/qemu/disk"
-	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/qemu/network"
-	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/qemu/pci"
-	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/qemu/serial"
-	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/qemu/usb"
-	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/util"
+	"github.com/pescobar/terraform-provider-proxmox/proxmox/Internal/pxapi/dns/nameservers"
+	"github.com/pescobar/terraform-provider-proxmox/proxmox/Internal/pxapi/guest/sshkeys"
+	"github.com/pescobar/terraform-provider-proxmox/proxmox/Internal/pxapi/guest/tags"
+	"github.com/pescobar/terraform-provider-proxmox/proxmox/Internal/resource/guest/qemu/cpu"
+	"github.com/pescobar/terraform-provider-proxmox/proxmox/Internal/resource/guest/qemu/disk"
+	"github.com/pescobar/terraform-provider-proxmox/proxmox/Internal/resource/guest/qemu/network"
+	"github.com/pescobar/terraform-provider-proxmox/proxmox/Internal/resource/guest/qemu/pci"
+	"github.com/pescobar/terraform-provider-proxmox/proxmox/Internal/resource/guest/qemu/serial"
+	"github.com/pescobar/terraform-provider-proxmox/proxmox/Internal/resource/guest/qemu/usb"
+	"github.com/pescobar/terraform-provider-proxmox/proxmox/Internal/util"
 )
 
 // using a global variable here so that we have an internally accessible
