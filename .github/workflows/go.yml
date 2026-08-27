@@ -1,6 +1,10 @@
 name: Go
 
 on:
+  # Runnable on any branch, so a branch that is not yet the default one can
+  # still be built and tested.
+  workflow_dispatch:
+
   push:
     branches: [main]
     paths-ignore:
