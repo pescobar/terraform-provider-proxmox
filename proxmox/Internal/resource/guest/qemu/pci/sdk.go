@@ -5,9 +5,9 @@ import (
 	"strconv"
 
 	pveAPI "github.com/Telmate/proxmox-api-go/proxmox"
-	"github.com/pescobar/terraform-provider-proxmox/proxmox/Internal/util"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/pescobar/terraform-provider-proxmox/proxmox/Internal/util"
 )
 
 const (

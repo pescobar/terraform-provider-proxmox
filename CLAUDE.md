@@ -46,9 +46,35 @@ branch. Changes on top of rc5, all of them mechanical:
 * The acceptance workflow defaults to Proxmox 8.4 only, and its default
   `testargs` matches nothing, because the inherited tests cannot pass.
 
-**Not verified locally: there is no Go toolchain on the machine this was built
-on, so the module rename has never been compiled.** `go.yml` on the first push
-is what proves it. If it fails, it will be an import path typo, nothing subtle.
+**Verified locally and in CI:** `go mod download`, `go vet`, `go build`,
+`go test -race` and `gofmt` all pass on the renamed module. Go 1.22 is
+installed on the dev box (`apt install golang-go`, aarch64), plus
+`staticcheck` in `~/go/bin`.
+
+Two things the rename shook out, both fixed:
+
+* **gofmt.** Import blocks were sorted for `github.com/Telmate/...`; the new
+  path sorts differently, so nine files became unformatted. `go.yml` does not
+  check formatting, so CI would not have caught it. Consider adding a `fmt`
+  job.
+* **`make test_unit` does not exist at rc5.** That target arrived upstream
+  later; rc5's Makefile has `test`. HEAD's `go.yml` called the newer name and
+  the job failed instantly. Anything else inherited from HEAD's workflows
+  should be checked against rc5's Makefile the same way.
+
+**Known inherited debt: 23 `staticcheck` SA1019 findings**, all of them the
+deprecated non-Context CRUD fields (`Create` rather than `CreateContext`) in
+`resource_lxc.go`, `resource_pool.go`, `resource_storage_iso.go`,
+`data_ha_group.go` and others. They are pre-existing in rc5, not caused by the
+fork. The `staticcheck` job is `continue-on-error: true` so the signal stays
+visible without gating every build. **Do not fix them in the drop-in version**:
+moving to `CreateContext` changes cancellation behaviour, so it belongs in a
+later release with its own testing, as part of the "align with Go and
+Terraform practices" pass.
+
+The Makefile derives its version from `git describe --tags`; CI checkouts are
+shallow and tagless, so it evaluated `$((<sha>+1))` and bash printed
+`value too great for base` on every run. `fetch-depth: 0` fixes it.
 
 Version numbering: publish `0.9.x` for the migration rehearsal, then `1.0.0`
 from the same commit as the last `0.9.x` once the rehearsal passes. Do **not**
