@@ -12,3 +12,6 @@ vendor/*
 
 # --- acceptance test environment (see test/acceptance/README.md) ---
 test/acceptance/.build/
+
+# goreleaser output
+dist/

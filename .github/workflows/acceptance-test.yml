@@ -50,6 +50,9 @@ env:
   # Bump to invalidate the cached Proxmox images on purpose.
   IMAGE_CACHE_EPOCH: '2'
 
+permissions:
+  contents: read
+
 jobs:
   acctest:
     # Production is on Proxmox 8 (8.4 is the final 8.x release) and the target

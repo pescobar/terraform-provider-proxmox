@@ -3,6 +3,11 @@ on:
   push:
     tags:
       - 'v*'
+# goreleaser creates the GitHub release and uploads assets. The repository
+# default for GITHUB_TOKEN is read-only, so this has to be asked for explicitly.
+permissions:
+  contents: write
+
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
