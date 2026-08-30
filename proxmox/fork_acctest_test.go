@@ -40,7 +40,7 @@ func forkEnv(key, fallback string) string {
 	return fallback
 }
 
-func forkNode() string    { return forkEnv("PVE_TEST_NODE", "testproxmox") }
+func forkNode() string    { return forkEnv("PVE_TEST_NODE_NAME", "testproxmox") }
 func forkStorage() string { return forkEnv("PVE_TEST_STORAGE", "local") }
 func forkBridge() string  { return forkEnv("PVE_TEST_BRIDGE", "vmbr0") }
 func forkBridge2() string { return forkEnv("PVE_TEST_BRIDGE2", "vmbr1") }

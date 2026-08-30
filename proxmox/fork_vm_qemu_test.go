@@ -1,6 +1,7 @@
 package proxmox
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
@@ -27,7 +28,15 @@ func TestAccForkVmQemu_Minimal(t *testing.T) {
 					resource.TestCheckResourceAttr(forkVMResource, "name", cfg.Name),
 					resource.TestCheckResourceAttr(forkVMResource, "target_node", forkNode()),
 					resource.TestCheckResourceAttr(forkVMResource, "pxe", "true"),
-					resource.TestCheckResourceAttrSet(forkVMResource, "vmid"),
+					// Not `vmid`: rc5 never writes it back to state.  It is
+					// Optional+Computed+ForceNew but only ever read from the
+					// config, so a configuration that does not set it leaves
+					// it absent from state for good -- which is exactly why
+					// three VMs in the state we run have no vmid either.  The
+					// id carries the real one, and forkCheckVMExists has
+					// already resolved it against the API.
+					resource.TestMatchResourceAttr(forkVMResource, "id",
+						regexp.MustCompile(`^`+regexp.QuoteMeta(forkNode())+`/qemu/[0-9]+$`)),
 				),
 			},
 		},

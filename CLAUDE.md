@@ -372,10 +372,18 @@ What it found, and what the tests were built from:
 Two things to settle before the migration rehearsal, both from section 8:
 
 * **`ldap_main`, `logserver` and `mirror` have `vmid` absent entirely** -- not
-  zero, absent -- and are the same three lacking `pxe`. `vmid` is
-  Optional+Computed, so rc5 always populates it; absent means state written by
-  a much older provider and never refreshed since. Most likely source of a
-  non-empty plan.
+  zero, absent -- and are the same three lacking `pxe`. This is **not** stale
+  state: rc5 never calls `d.Set("vmid", ...)` anywhere. `vmid` is
+  Optional+Computed+ForceNew but is only ever read *from* the configuration
+  (`resource_vm_qemu.go:794`), so a config that does not set it explicitly
+  leaves it absent from state for good. The other 67 have it because their
+  configs name it. Confirmed by `TestAccForkVmQemu_Minimal`, which failed on
+  exactly this the first time it ran.
+
+  Worth leaving alone in the drop-in release. Writing `vmid` back would change
+  what lands in state, which is the one thing the migration must not do; it
+  belongs in a later release with its own `SchemaVersion` if it is wanted at
+  all. Tests assert on the resource id, which carries the real vmid, instead.
 * **`proxmox_vm_qemu.testvms` has 2 instances**, so there is a `count` /
   `for_each` resource with indexed addresses for the state rewrite to handle.
 
