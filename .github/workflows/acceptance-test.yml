@@ -13,9 +13,9 @@ on:
         default: '8.4'
         options: ['8.4', '9.2', 'both']
       testargs:
-        description: 'go test arguments. Defaults to a pattern that matches nothing, because the inherited acceptance tests cannot pass (see README).'
+        description: 'go test arguments. Defaults to the acceptance tests written for this fork. Use -run=TestAccForkUpgrade for the provider upgrade tests, which download a baseline provider from the registry.'
         required: false
-        default: '-run=TestAccNothingYet'
+        default: '-run=TestAccForkVmQemu_Minimal'
       force_rebuild:
         description: 'Rebuild the Proxmox VE image instead of using the cached one'
         type: boolean
@@ -48,7 +48,7 @@ concurrency:
 env:
   GO_VERSION: '1.26'
   # Bump to invalidate the cached Proxmox images on purpose.
-  IMAGE_CACHE_EPOCH: '2'
+  IMAGE_CACHE_EPOCH: '3'
 
 permissions:
   contents: read
@@ -169,7 +169,7 @@ jobs:
           PM_USER: root@pam
           PM_PASS: proxmox-acctest
           PM_TLS_INSECURE: 'true'
-        run: make acctest TESTARGS="-v -timeout 60m ${{ inputs.testargs || '-run=TestAccNothingYet' }}"
+        run: make acctest TESTARGS="-v -timeout 60m ${{ inputs.testargs || '-run=TestAccForkVmQemu_Minimal' }}"
 
       - name: Collect logs
         if: always()
