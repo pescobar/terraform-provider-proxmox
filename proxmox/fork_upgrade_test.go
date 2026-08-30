@@ -99,6 +99,22 @@ func defaultNamespace(source string) string {
 // This is the only test that needs the network beyond the Proxmox VM: step one
 // downloads the baseline provider from the registry.
 func TestAccForkUpgrade_FromUpstreamRc5(t *testing.T) {
+	// Only meaningful against Proxmox VE 8, and that is the point rather than a
+	// limitation.  Step one runs the real upstream v3.0.1-rc5 from the
+	// registry, which still demands the VM.Monitor privilege that PVE 9
+	// removed, so on PVE 9 it cannot configure at all -- confirmed by run
+	// 33340162770, where this was the only test still failing after the
+	// privilege was dropped from the fork.
+	//
+	// The consequence is an ordering constraint on the real migration, not
+	// something to work around here: production must move onto the fork while
+	// it is still on Proxmox 8, and upgrade Proxmox afterwards.  The reverse
+	// order has no working starting point, because the provider production
+	// runs today cannot talk to Proxmox 9 at all.
+	if forkEnv("PVE_TEST_PVE_VERSION", "") == "9" {
+		t.Skip("upstream v3.0.1-rc5 cannot configure against Proxmox VE 9 (it requires VM.Monitor, which PVE 9 removed); this rehearsal belongs on PVE 8")
+	}
+
 	source, version := forkUpgradeSource(t,
 		"PVE_TEST_UPSTREAM_HOST", "PVE_TEST_UPSTREAM_NAMESPACE",
 		"PVE_TEST_UPSTREAM_SOURCE", "PVE_TEST_UPSTREAM_VERSION",

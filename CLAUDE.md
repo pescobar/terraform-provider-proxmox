@@ -247,8 +247,10 @@ proxmox/fork_pool_test.go      proxmox_pool
 proxmox/fork_upgrade_test.go   provider version upgrade tests
 ```
 
-**All nine pass against Proxmox VE 8.4** (run 33339268367 and its
-predecessors, 2026-08-30). They were landed one group at a time, each gated on
+**All nine pass against Proxmox VE 8.4** (run 33339420644) **and against
+Proxmox VE 9.2** (run 33340162770), the latter once `VM.Monitor` was dropped
+from the minimum permission list. On PVE 9 the rc5 rehearsal skips itself, for
+the reason under "Migration ordering" below. They were landed one group at a time, each gated on
 the previous being green, which is what made every failure readable. Keep that
 habit when adding more.
 
@@ -426,22 +428,64 @@ Two things to settle before the migration rehearsal, both from section 8:
 * **`proxmox_vm_qemu.testvms` has 2 instances**, so there is a `count` /
   `for_each` resource with indexed addresses for the state rewrite to handle.
 
+### Migration ordering is now settled, and it is one way only
+
+Running the suite against Proxmox VE 9.2 turned the PVE 9 blocker from a code
+reading into a measurement, and then into a constraint on the real migration.
+
+Before the backport (run 33339630438) **all nine tests failed in under three
+seconds each**, at provider configuration, before touching a VM:
+
+```
+permissions for user/token root@pam are not sufficient, please provide also the
+following permissions that are missing: [VM.Monitor]
+```
+
+The environment was healthy throughout -- the image built, the node came up,
+the hypervisor level boot test passed -- so the provider was the only thing in
+the way. After dropping the privilege (run 33340162770) everything passes
+except `TestAccForkUpgrade_FromUpstreamRc5`, which still reports `VM.Monitor`,
+and correctly: **step one of that test runs the genuine upstream v3.0.1-rc5
+pulled from the registry**, which our one line fix cannot reach.
+
+So, stated plainly:
+
+* The **fork** works on Proxmox VE 9, with that single backport.
+* **Upstream v3.0.1-rc5 does not**, on any account including `root@pam`,
+  because the privilege it demands no longer exists to be granted.
+
+**Therefore the migration has an order, and only one works: move production
+onto the fork while it is still on Proxmox 8, then upgrade Proxmox to 9.** The
+reverse has no starting point -- after a PVE 9 upgrade the provider production
+runs today cannot configure, so there is nothing to migrate *from*, and the
+cluster would be stranded until the provider swap happened anyway, unplanned
+and under pressure.
+
+The rehearsal test skips itself on PVE 9 rather than pretending otherwise.
+
 ### Next
 
-1. Run the new suite for the first time, against both Proxmox versions:
-   `make acctest-local TESTARGS='-run=TestAccForkVmQemu_Minimal -v'` locally,
-   then the workflow. The `vmbr1` addition means the images rebuild once.
-2. Backport the one line that removes `VM.Monitor` from `minimumPermissions`,
-   without which rc5 cannot talk to Proxmox 9 at all. Consider also
-   backporting `pm_minimum_permission_check` / `pm_minimum_permission_list`.
-   `TestAccForkPool_Basic` is the test that covers the related `Pool.Audit`.
-3. Confirm `TestAccForkUpgrade_FromUpstreamRc5` can resolve the `3.0.1-rc5`
-   prerelease from the registry; fall back to a filesystem mirror if not.
-4. Look at the three VMs with no `vmid`, and at the `count` based resource,
-   before rehearsing anything.
-5. Rehearse the state migration on a copy of a production state file, and
-   confirm `tofu plan` is empty.
-6. Add tests as the need appears, not in advance. HA is the biggest known gap.
+Done since this was last written: the suite runs green on both versions, the
+`3.0.1-rc5` prerelease resolves from the registry, and `VM.Monitor` is
+backported.
+
+1. Merge `acceptance-tests` into `main` so the nightly schedule picks it up.
+   Prune the epoch 2 images afterwards -- four images at ~2.5GB each against a
+   10GB limit.
+2. Consider backporting `pm_minimum_permission_check` /
+   `pm_minimum_permission_list`, so the next privilege rename is configuration
+   rather than a code change and a release.
+3. Look at the `count` based resource (`proxmox_vm_qemu.testvms`, 2 instances)
+   before rehearsing the state rewrite. The three VMs with no `vmid` are
+   understood now and need no action.
+4. Rehearse the state migration on a copy of a production state file and
+   confirm `tofu plan` is empty. Do this **while still on Proxmox 8** -- see
+   "Migration ordering" above.
+5. Cut `0.9.0`, then set `PVE_TEST_PREVIOUS_VERSION` so
+   `TestAccForkUpgrade_FromPreviousRelease` stops skipping. Until a release
+   exists it cannot run, and it is the test that matters most long term.
+6. Add tests as the need appears, not in advance. HA is the biggest known gap;
+   a reboot-requiring update of a running VM is the second.
 
 ## Provider migration (Telmate -> fork), with OpenTofu
 
