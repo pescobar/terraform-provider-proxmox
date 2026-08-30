@@ -34,6 +34,14 @@ while [ "$(date +%s)" -lt "${deadline}" ]; do
             log "the image was built without it; rebuild (bump IMAGE_CACHE_EPOCH in CI)"
             exit 1
         fi
+    elif ! api_get "/nodes/${NODE_NAME}/network" "${ticket}" | grep -q '"iface":"vmbr1"'; then
+        last="the vmbr1 bridge is missing (multi-interface tests need it)"
+        node_up_since=${node_up_since:-$(date +%s)}
+        if [ $(( $(date +%s) - node_up_since )) -ge 180 ]; then
+            log "node ${NODE_NAME} is online but ${last}"
+            log "the image was built without it; rebuild (bump IMAGE_CACHE_EPOCH in CI)"
+            exit 1
+        fi
     elif ! api_get "/nodes/${NODE_NAME}/storage/local/content" "${ticket}" | grep -q "SpinRite.iso"; then
         last="the fixtures are missing (local:iso/SpinRite.iso)"
         # The node answering means Proxmox is up; the fixtures are baked into
