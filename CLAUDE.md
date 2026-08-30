@@ -125,6 +125,7 @@ test/acceptance/scripts/stop.sh           kill it, drop the overlay
 test/acceptance/scripts/wait-ready.sh     probe: API auth -> node online -> fixtures
 test/acceptance/scripts/smoke-boot-vm.sh  create, boot and destroy a VM over the API
 test/acceptance/scripts/env.sh            PM_* variables for the local VM
+test/acceptance/scripts/state-profile.sh  profile a real state file (see below)
 test/acceptance/scripts/common.sh         all settings, overridable via PVE_TEST_*
 test/acceptance/guest/                    scripts that run inside the VM
 test/acceptance/README.md                 full documentation
@@ -232,19 +233,168 @@ Entries whose hash suffix does not match the current scripts can never be hit
 again; they are only crowding the limit. To find the current suffix, hash the
 same files the workflow does, in the same order.
 
+### Done: acceptance tests for the fork (2026-08-30)
+
+Written from scratch against the rc5 schema. The inherited upstream tests are
+not a base to build on: they still configure a top level `iso` argument that
+was removed in `2808e32`, an ancestor of rc5. Everything the fork adds is
+prefixed `fork` / `TestAccFork` so the delta against upstream stays legible.
+
+```
+proxmox/fork_acctest_test.go   fixtures, provider plumbing, check funcs, HCL builder
+proxmox/fork_vm_qemu_test.go   the VM tests
+proxmox/fork_pool_test.go      proxmox_pool
+proxmox/fork_upgrade_test.go   provider version upgrade tests
+```
+
+**They land in stages, one push at a time.** The environment has never run a
+provider level test, so widening the suite and debugging the environment at the
+same time would make every failure ambiguous. The first push carries the
+scaffolding and `TestAccForkVmQemu_Minimal` alone, with the workflow's default
+`testargs` pointed at exactly that test. Each later push adds a group and
+widens the default:
+
+| Stage | Adds | Default `testargs` |
+| --- | --- | --- |
+| 1 | scaffolding, `_Minimal` | `-run=TestAccForkVmQemu_Minimal` |
+| 2 | `_FullShape`, `_Import`, `_UpdateInPlace`, `_TagsAreOrderInsensitive`, `_StoppedState` | `-run=TestAccForkVmQemu_` |
+| 3 | `TestAccForkPool_Basic` | `-run=TestAccFork(VmQemu\|Pool)_` |
+| 4 | the upgrade tests | unchanged; opt in with `-run=TestAccForkUpgrade` |
+
+Do not skip ahead: a green stage is what makes the next one's failures
+readable.
+
+**The suite is deliberately small, and grows on demand.** It covers the
+features in routine use, not the schema surface. Adding a test is cheap;
+maintaining tests for paths nobody uses is not. Deferred on purpose, with the
+reason:
+
+* **HA (`hastate`, `hagroup`)** -- set on 69 of 70 production VMs, so this is
+  the largest known gap. Left out by choice, not oversight. A single node
+  `pvecm create` cluster would make `ha-manager` answer, if it is ever wanted.
+* **`protection = true`** -- blocks destroy, so any test using it needs a final
+  step turning it off or the framework's cleanup wedges the VM.
+* **Multi-node / `target_nodes`, PCI and USB passthrough, `efidisk` / OVMF,
+  `args`, cloud-init, clone-from-template** -- none of these appear in the
+  state we run, so there is nothing to regress yet.
+* **`format = "raw"`** -- 7 of 120 production disks. The test image's `local`
+  is a `dir` storage, so qcow2 is the faithful default; raw would want an
+  LVM-thin storage adding to the image.
+
+#### The trap that shaped every test config
+
+`define_connection_info` defaults to **`true`**, and `initConnInfo`
+(`resource_vm_qemu.go:1557`) only returns early when it is `false`. With
+`agent = 1` -- which every production VM sets -- a config that leaves the
+default in place makes the provider block waiting for a guest agent that a PXE
+booted VM with no OS never starts, for the whole 20 minute create timeout.
+Production sets it `false` on all 70 VMs, so the tests do too, explicitly.
+
+#### The upgrade tests, and why they work
+
+`helper/resource` builds `TF_REATTACH_PROVIDERS` keyed as `host/namespace/name`,
+taking the first two from `TF_ACC_PROVIDER_HOST` and `TF_ACC_PROVIDER_NAMESPACE`
+(SDK `helper/resource/plugin.go`, `getProviderAddr`). Setting those to the
+address a state file already records makes the in-process provider answer for
+that address. So one step can create resources with a released provider pulled
+from the registry, and the next step reads that state with the working tree's
+code. Providers are declared per step: the SDK rejects a case that sets them at
+both the TestCase and TestStep level.
+
+* `TestAccForkUpgrade_FromUpstreamRc5` -- upstream `telmate/proxmox` 3.0.1-rc5
+  creates the VM, the fork adopts the state. An empty plan is the acceptance
+  criterion for moving production onto the fork; the third step also requires
+  the vmid to be unchanged, because a recreate would rebuild the fleet.
+* `TestAccForkUpgrade_FromPreviousRelease` -- the same against the fork's last
+  published version. Skips unless `PVE_TEST_PREVIOUS_VERSION` is set. **This is
+  the guarantee upstream never offered, so it is the one never to break**: any
+  change needing `SchemaVersion` + `StateUpgraders` fails here first.
+
+Unverified: `VersionConstraint: "3.0.1-rc5"` is a prerelease. An exact pin
+normally resolves, but it has not been run. Overridable with
+`PVE_TEST_UPSTREAM_VERSION`; the fallback is a filesystem mirror. These are
+also the only tests needing the network beyond the local Proxmox VM.
+
+#### Fixtures
+
+Generic names, all overridable so the suite can run against a real cluster:
+`PVE_TEST_NODE` (`testproxmox`), `PVE_TEST_STORAGE` (`local`),
+`PVE_TEST_BRIDGE` (`vmbr0`), `PVE_TEST_BRIDGE2` (`vmbr1`), `PVE_TEST_ISO`
+(`local:iso/SpinRite.iso`).
+
+`vmbr1` is new: 55 of 70 production VMs have two or more interfaces, so
+multi-interface VMs are the common case, not an edge case. It is addressless,
+verified at build time so a broken image never reaches the cache, and probed by
+`wait-ready.sh` alongside `vmbr0`. **`IMAGE_CACHE_EPOCH` went 2 -> 3** for it;
+the provisioning change re-keys the cache anyway, so prune the orphaned pair.
+
+The workflow's default `testargs` tracks the stage table above. The upgrade
+tests are always opt in, with `-run=TestAccForkUpgrade`: they are the only ones
+that reach the network beyond the local Proxmox VM.
+
+### Done: profiling the production state (2026-08-30)
+
+`test/acceptance/scripts/state-profile.sh` reports how a real state file uses
+the provider, so tests aim at the schema actually in production rather than at
+the whole surface. It filters to `proxmox_*`, never prints secrets, and shows
+identifying values as set/unset unless given `--show-values`.
+
+```bash
+./test/acceptance/scripts/state-profile.sh ~/tmp/tofu-int.tfstate
+```
+
+What it found, and what the tests were built from:
+
+* **The fleet is PXE booted, with MAAS installing the OS.** `pxe` on 67 of 70,
+  and no cloud-init, no `clone`, no template anywhere. The provider's job ends
+  once the VM exists and runs. This removes most of the fixture cost that a
+  clone-based workflow would have needed.
+* **Boot disk is `virtio0`, not scsi** (`boot = "order=virtio0;net0"`).
+  `scsihw = virtio-scsi-single` is set on all 70 but unused, there being no
+  scsi disks.
+* **`hotplug = "cpu,network,disk,usb"`** -- not the schema default
+  (`network,disk,usb`), so it is a deliberate setting and is asserted.
+* Structured `disks` block, never the legacy flat `disk`. `cpu_type`, never the
+  deprecated `cpu`. Both are the non-deprecated spellings, so no schema
+  migration debt is hiding in the state.
+* **No VLAN tags at all** (149 interfaces, every `tag` 0), so a VLAN aware
+  bridge is not needed in the image.
+* `format = qcow2` on 113 of 120 disks, against a schema default of `raw`, so
+  the configs always set it explicitly.
+* Two provider aliases, `pveint` and `pveusr`, on one address -- two clusters
+  (`pve-int0*` and `pve-usr0*` nodes). `state replace-provider` keys on the
+  address, so one run covers both.
+* **Tags are safe.** `Internal/pxapi/guest/tags/tags.go:47` sorts and
+  deduplicates both sides in a `DiffSuppressFunc`, so unsorted tag lists do not
+  drift. Worth a regression test precisely because a future backport could
+  silently drop it.
+
+Two things to settle before the migration rehearsal, both from section 8:
+
+* **`ldap_main`, `logserver` and `mirror` have `vmid` absent entirely** -- not
+  zero, absent -- and are the same three lacking `pxe`. `vmid` is
+  Optional+Computed, so rc5 always populates it; absent means state written by
+  a much older provider and never refreshed since. Most likely source of a
+  non-empty plan.
+* **`proxmox_vm_qemu.testvms` has 2 instances**, so there is a `count` /
+  `for_each` resource with indexed addresses for the state rewrite to handle.
+
 ### Next
 
-1. Branch from `v3.0.1-rc5` (`git checkout -b main v3.0.1-rc5`, upstream kept
-   as a remote for cherry picking).
+1. Run the new suite for the first time, against both Proxmox versions:
+   `make acctest-local TESTARGS='-run=TestAccForkVmQemu_Minimal -v'` locally,
+   then the workflow. The `vmbr1` addition means the images rebuild once.
 2. Backport the one line that removes `VM.Monitor` from `minimumPermissions`,
    without which rc5 cannot talk to Proxmox 9 at all. Consider also
    backporting `pm_minimum_permission_check` / `pm_minimum_permission_list`.
-3. Write new acceptance tests against the rc5 schema, using
-   `proxmox/resource_vm_qemu_test.go` for coverage ideas only. The CI
-   environment carries over unchanged: node `testproxmox`, `local` accepting
-   images, `local:iso/SpinRite.iso`, `vmbr0`.
-4. Point the workflow's default `testargs` at the new tests once they exist.
-5. Rehearse the state migration on a copy of a production state file.
+   `TestAccForkPool_Basic` is the test that covers the related `Pool.Audit`.
+3. Confirm `TestAccForkUpgrade_FromUpstreamRc5` can resolve the `3.0.1-rc5`
+   prerelease from the registry; fall back to a filesystem mirror if not.
+4. Look at the three VMs with no `vmid`, and at the `count` based resource,
+   before rehearsing anything.
+5. Rehearse the state migration on a copy of a production state file, and
+   confirm `tofu plan` is empty.
+6. Add tests as the need appears, not in advance. HA is the biggest known gap.
 
 ## Provider migration (Telmate -> fork), with OpenTofu
 
@@ -351,5 +501,9 @@ password of a throwaway VM that only ever listens on the runner's loopback.
 * Breaking schema changes require `SchemaVersion` + `StateUpgraders`. No
   exceptions; this is the reason the fork exists.
 * New tooling lives in `test/`, not in `proxmox/`, to keep the diff against
-  upstream legible.
+  upstream legible. Go acceptance tests are the exception, since they have to
+  be in `package proxmox`; those are named `fork_*_test.go` instead.
+* Acceptance tests start simple and grow on demand. Cover what is actually
+  used, add a test when a feature starts being used or a bug needs pinning,
+  and write down what was deferred and why rather than leaving it implied.
 * `test/acceptance/.build/` is git ignored: downloads, images and console logs.
