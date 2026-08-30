@@ -15,7 +15,7 @@ on:
       testargs:
         description: 'go test arguments. Defaults to the acceptance tests written for this fork. Use -run=TestAccForkUpgrade for the provider upgrade tests, which download a baseline provider from the registry.'
         required: false
-        default: '-run=TestAccForkVmQemu_Minimal'
+        default: '-run=TestAccForkVmQemu_'
       force_rebuild:
         description: 'Rebuild the Proxmox VE image instead of using the cached one'
         type: boolean
@@ -169,7 +169,7 @@ jobs:
           PM_USER: root@pam
           PM_PASS: proxmox-acctest
           PM_TLS_INSECURE: 'true'
-        run: make acctest TESTARGS="-v -timeout 60m ${{ inputs.testargs || '-run=TestAccForkVmQemu_Minimal' }}"
+        run: make acctest TESTARGS="-v -timeout 60m ${{ inputs.testargs || '-run=TestAccForkVmQemu_' }}"
 
       - name: Collect logs
         if: always()
