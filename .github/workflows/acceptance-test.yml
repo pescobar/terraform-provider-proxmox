@@ -13,9 +13,9 @@ on:
         default: '8.4'
         options: ['8.4', '9.2', 'both']
       testargs:
-        description: 'go test arguments. Defaults to the acceptance tests written for this fork. Use -run=TestAccForkUpgrade for the provider upgrade tests, which download a baseline provider from the registry.'
+        description: 'go test arguments. Defaults to the acceptance tests written for this fork. Note that TESTARGS is expanded unquoted by the Makefile, so it must not contain shell metacharacters -- no parentheses or pipes in a -run regex.'
         required: false
-        default: '-run=TestAccForkVmQemu_'
+        default: '-run=TestAccFork'
       force_rebuild:
         description: 'Rebuild the Proxmox VE image instead of using the cached one'
         type: boolean
@@ -169,7 +169,7 @@ jobs:
           PM_USER: root@pam
           PM_PASS: proxmox-acctest
           PM_TLS_INSECURE: 'true'
-        run: make acctest TESTARGS="-v -timeout 60m ${{ inputs.testargs || '-run=TestAccForkVmQemu_' }}"
+        run: make acctest TESTARGS="-v -timeout 60m ${{ inputs.testargs || '-run=TestAccFork' }}"
 
       - name: Collect logs
         if: always()

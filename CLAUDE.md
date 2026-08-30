@@ -258,7 +258,7 @@ widens the default:
 | --- | --- | --- |
 | 1 | scaffolding, `_Minimal` | `-run=TestAccForkVmQemu_Minimal` |
 | 2 | `_FullShape`, `_Import`, `_UpdateInPlace`, `_TagsAreOrderInsensitive`, `_StoppedState` | `-run=TestAccForkVmQemu_` |
-| 3 | `TestAccForkPool_Basic` | `-run=TestAccFork(VmQemu\|Pool)_` |
+| 3 | `TestAccForkPool_Basic` | `-run=TestAccFork` |
 | 4 | the upgrade tests | unchanged; opt in with `-run=TestAccForkUpgrade` |
 
 Do not skip ahead: a green stage is what makes the next one's failures
@@ -328,9 +328,20 @@ verified at build time so a broken image never reaches the cache, and probed by
 `wait-ready.sh` alongside `vmbr0`. **`IMAGE_CACHE_EPOCH` went 2 -> 3** for it;
 the provisioning change re-keys the cache anyway, so prune the orphaned pair.
 
-The workflow's default `testargs` tracks the stage table above. The upgrade
-tests are always opt in, with `-run=TestAccForkUpgrade`: they are the only ones
-that reach the network beyond the local Proxmox VM.
+The workflow's default `testargs` tracks the stage table above.
+
+**`TESTARGS` must not contain shell metacharacters.** The Makefile expands it
+unquoted into `go test ./proxmox $(TESTARGS)`, so a `-run` regex using
+alternation dies before the tests start:
+
+```
+/bin/bash: -c: line 1: syntax error near unexpected token `('
+```
+
+This is why the default is the bare prefix `-run=TestAccFork` rather than
+`-run=TestAccFork(VmQemu|Pool)_`. Select a subset with a prefix -- the test
+names are grouped for it: `TestAccForkVmQemu_`, `TestAccForkPool_`,
+`TestAccForkUpgrade_`.
 
 ### Done: profiling the production state (2026-08-30)
 
