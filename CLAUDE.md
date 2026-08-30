@@ -247,22 +247,39 @@ proxmox/fork_pool_test.go      proxmox_pool
 proxmox/fork_upgrade_test.go   provider version upgrade tests
 ```
 
-**They land in stages, one push at a time.** The environment has never run a
-provider level test, so widening the suite and debugging the environment at the
-same time would make every failure ambiguous. The first push carries the
-scaffolding and `TestAccForkVmQemu_Minimal` alone, with the workflow's default
-`testargs` pointed at exactly that test. Each later push adds a group and
-widens the default:
+**All nine pass against Proxmox VE 8.4** (run 33339268367 and its
+predecessors, 2026-08-30). They were landed one group at a time, each gated on
+the previous being green, which is what made every failure readable. Keep that
+habit when adding more.
 
-| Stage | Adds | Default `testargs` |
-| --- | --- | --- |
-| 1 | scaffolding, `_Minimal` | `-run=TestAccForkVmQemu_Minimal` |
-| 2 | `_FullShape`, `_Import`, `_UpdateInPlace`, `_TagsAreOrderInsensitive`, `_StoppedState` | `-run=TestAccForkVmQemu_` |
-| 3 | `TestAccForkPool_Basic` | `-run=TestAccFork` |
-| 4 | the upgrade tests | unchanged; opt in with `-run=TestAccForkUpgrade` |
+What running them for the first time actually found -- five failures, none of
+them flaky, every one a fact about the provider or the environment worth
+keeping:
 
-Do not skip ahead: a green stage is what makes the next one's failures
-readable.
+1. **`vmid` is never written to state.** rc5 has no `d.Set("vmid", ...)`
+   anywhere; the attribute is Optional+Computed+ForceNew but only ever read
+   *from* configuration (`resource_vm_qemu.go:794`). Tests assert on the
+   resource id instead. This is also the real explanation for the three
+   production VMs with no vmid -- their configs do not name one.
+2. **Import does not populate `target_node`, `automatic_reboot`, `skip_ipv4`,
+   `skip_ipv6` or `vcpus`**, `target_node` included, though the resource id
+   carries the node. They are on the `ImportStateVerifyIgnore` list.
+3. **`proxmox_pool` does not populate `poolid` on import** either
+   (`_resourcePoolRead` sets only `comment`). Sharper than it looks: `poolid`
+   is Required+ForceNew, so a pool adopted by import shows a *replacement* on
+   the next plan. Anyone importing pools needs to know.
+4. **A reboot-requiring update cannot be tested on a VM with no OS.**
+   `rebootRequired` comes back from `config.Update()`
+   (`resource_vm_qemu.go:1004`) and the API library performs the powerdown
+   itself, ahead of the provider's force-stop fallback, so there is no
+   recovery. A PXE VM never answers ACPI and the apply dies with "VM
+   quit/powerdown failed - got timeout" after ~3.5 minutes. `_UpdateInPlace`
+   therefore runs against a stopped VM, which also lets it cover memory.
+5. **`TESTARGS` must not contain shell metacharacters** -- see below.
+
+None of the provider behaviours above were fixed. Changing what lands in state
+is exactly what a drop-in migration must not do; they are recorded so the
+decision is deliberate rather than forgotten.
 
 **The suite is deliberately small, and grows on demand.** It covers the
 features in routine use, not the schema surface. Adding a test is cheap;
@@ -310,10 +327,21 @@ both the TestCase and TestStep level.
   the guarantee upstream never offered, so it is the one never to break**: any
   change needing `SchemaVersion` + `StateUpgraders` fails here first.
 
-Unverified: `VersionConstraint: "3.0.1-rc5"` is a prerelease. An exact pin
-normally resolves, but it has not been run. Overridable with
-`PVE_TEST_UPSTREAM_VERSION`; the fallback is a filesystem mirror. These are
-also the only tests needing the network beyond the local Proxmox VM.
+**The prerelease pin resolves.** `VersionConstraint: "3.0.1-rc5"` installs
+from the registry without complaint, so no filesystem mirror is needed.
+Overridable with `PVE_TEST_UPSTREAM_VERSION`. These remain the only tests
+needing the network beyond the local Proxmox VM.
+
+**Both steps must name the same provider address, and that takes an explicit
+`terraform` block in the configuration.** `mergedConfig` (the SDK's
+`teststep_providers.go`) generates `required_providers` only for steps
+declaring `ExternalProviders`, and returns the configuration untouched the
+moment it finds a `terraform {` block of its own. A `ProviderFactories` step
+otherwise gets nothing, terraform infers the source from the resource type
+prefix -- `registry.opentofu.org/hashicorp/proxmox` -- while the baseline step
+locked `telmate/proxmox`, and step two dies with "Inconsistent dependency lock
+file". `forkRequiredProviders()` writes the block; the version is pinned only
+on the baseline step, since the lock file it writes keeps the rest consistent.
 
 #### Fixtures
 
