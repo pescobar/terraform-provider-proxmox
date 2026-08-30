@@ -219,7 +219,18 @@ orphans the previous pair, ~5GB at a time**. Nothing reclaims the old entries
 automatically until GitHub starts evicting, and it evicts least-recently-used,
 which can take the images with it.
 
-This bit us on 2026-08-27: four images, 11.27GB, over the limit and evicting.
+**Caches are also scoped to the branch that wrote them.** A cache created on a
+topic branch is invisible to every other topic branch; only caches on the
+default branch are visible to all. So a series of stage branches each rebuilds
+and re-saves the same image, under the same key, without ever seeing the
+others. Landing the acceptance suite in four stages cost four identical 8.4
+images -- 11.35GB, over the limit again, on 2026-08-31 -- and three wasted
+image builds. Once this is merged to `main` the nightly writes a
+default-branch cache that every branch can restore, and the problem goes away;
+until then, prune after a run of stage branches, or run them all on one branch.
+
+This bit us on 2026-08-27 too: four images, 11.27GB, over the limit and
+evicting.
 Check and prune after a run of provisioning changes:
 
 ```bash
