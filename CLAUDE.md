@@ -43,13 +43,38 @@ branch. Changes on top of rc5, all of them mechanical:
 * `release.yml` un-parked, ready for `GPG_PRIVATE_KEY` / `PASSPHRASE`.
 * LICENSE keeps upstream's MIT notice verbatim and adds ours, as MIT requires.
 * README explains what this fork is and why it exists.
-* The acceptance workflow defaults to Proxmox 8.4 only, and its default
-  `testargs` matches nothing, because the inherited tests cannot pass.
+* The acceptance workflow defaults to Proxmox 8.4 only. Its default `testargs`
+  now runs the fork's own suite; it used to match nothing, because the
+  inherited tests could not pass.
 
 **Verified locally and in CI:** `go mod download`, `go vet`, `go build`,
-`go test -race` and `gofmt` all pass on the renamed module. Go 1.22 is
-installed on the dev box (`apt install golang-go`, aarch64), plus
-`staticcheck` in `~/go/bin`.
+`go test -race` and `gofmt` all pass on the renamed module.
+
+**Dev box toolchain, aligned with CI (2026-08-31).** The box has Debian's
+`golang-1.22-go` at `/usr/lib/go-1.22`, which is too old to install a
+staticcheck that detects the SA1019 findings, so local lint runs were quietly
+reporting a clean tree. Fixed without root or apt, using Go's own toolchain
+mechanism:
+
+```bash
+go env -w GOTOOLCHAIN=go1.26.7          # the version CI's `1.26` resolves to
+go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
+staticcheck ./...                       # 16 findings, same as CI
+```
+
+`go env -w` persists in `~/.config/go/env`, so it survives new shells, and
+`go env -w GOTOOLCHAIN=auto` undoes it. The pin is an exact patch version
+while CI asks for `1.26` and floats, so they will diverge when CI picks up
+1.26.8; that is deliberate, and re-pinning is a one-liner.
+
+**One gap remains, on purpose.** `go.yml` builds, vets and tests on
+`GO_VERSION: '1.21'`, matching the `go` directive in `go.mod`, so CI keeps
+checking that the module still builds at its declared floor. The dev box now
+runs 1.26.7 for everything. To reproduce a CI build exactly:
+
+```bash
+GOTOOLCHAIN=go1.21.13 go build ./...
+```
 
 Two things the rename shook out, both fixed:
 
