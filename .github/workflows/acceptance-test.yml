@@ -68,7 +68,11 @@ jobs:
           || github.event.inputs.pve_version == '9.2' && '[{"pve_major":"9","pve_version":"9.2"}]'
           || github.event.inputs.pve_version == 'both' && '[{"pve_major":"8","pve_version":"8.4"},{"pve_major":"9","pve_version":"9.2"}]'
           || '[{"pve_major":"8","pve_version":"8.4"}]') }}
-    name: Proxmox VE ${{ matrix.pve_version }}
+    # Names the workflow as well as the matrix leg.  In a pull request's
+    # checks list every workflow's jobs are shown flat, so a bare
+    # "Proxmox VE 8.4" sits next to build/vet/staticcheck/test from go.yml
+    # with nothing to say which box it belongs to.
+    name: Acceptance tests (Proxmox VE ${{ matrix.pve_version }})
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
