@@ -62,15 +62,38 @@ Two things the rename shook out, both fixed:
   the job failed instantly. Anything else inherited from HEAD's workflows
   should be checked against rc5's Makefile the same way.
 
-**Known inherited debt: 23 `staticcheck` SA1019 findings**, all of them the
-deprecated non-Context CRUD fields (`Create` rather than `CreateContext`) in
-`resource_lxc.go`, `resource_pool.go`, `resource_storage_iso.go`,
-`data_ha_group.go` and others. They are pre-existing in rc5, not caused by the
-fork. The `staticcheck` job is `continue-on-error: true` so the signal stays
-visible without gating every build. **Do not fix them in the drop-in version**:
-moving to `CreateContext` changes cancellation behaviour, so it belongs in a
-later release with its own testing, as part of the "align with Go and
-Terraform practices" pass.
+**Known inherited debt: 23 `staticcheck` SA1019 findings**, confirmed exactly
+by run 33369112350:
+
+| File | Findings | What |
+| --- | --- | --- |
+| `resource_vm_qemu_test.go` | 7 | `TestCase.Providers`, superseded by `ProviderFactories` |
+| `resource_pool.go` | 4 | non-Context CRUD fields |
+| `resource_lxc_disk.go` | 4 | non-Context CRUD fields |
+| `resource_storage_iso.go` | 3 | non-Context CRUD fields |
+| `resource_lxc.go` | 3 | non-Context CRUD fields |
+| `provider.go` | 1 | `Provider.ConfigureFunc` |
+| `data_ha_group.go` | 1 | non-Context CRUD fields |
+
+All pre-existing in rc5, none caused by the fork, and the `fork_*_test.go`
+files add none. The `staticcheck` job is `continue-on-error: true`, so the run
+still concludes success and a pull request stays mergeable ("unstable", not
+blocked) while the signal remains visible. **Do not fix them in the drop-in
+version**: moving to `CreateContext` changes cancellation behaviour, so it
+belongs in a later release with its own testing, as part of the "align with Go
+and Terraform practices" pass. The 7 in `resource_vm_qemu_test.go` are the
+cheapest to clear, since that file is dead code already.
+
+**Watch the staticcheck version, because an old one reports a false all-clear.**
+v0.4.7 and v0.5.1 both report **zero** SA1019 on this tree -- not zero
+findings overall, they still return 177 with `-checks all`, they just do not
+flag these. Only v0.6 and later detect them. So a local run with whatever is
+already in `~/go/bin` can look clean when it is not. The workflow pins
+`@v0.8.1` and gives that job its own Go 1.26, because each staticcheck release
+demands a newer toolchain to install: v0.5.1 needs 1.22.1, v0.6.x needs 1.23,
+v0.8.1 needs 1.26. Installing `@latest` is what broke the job before -- it
+floated to v0.8.1, failed at install against the 1.21 toolchain, skipped the
+run step, and quietly stopped analysing anything at all.
 
 The Makefile derives its version from `git describe --tags`; CI checkouts are
 shallow and tagless, so it evaluated `$((<sha>+1))` and bash printed
