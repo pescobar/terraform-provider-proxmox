@@ -109,6 +109,38 @@ version**: moving to `CreateContext` changes cancellation behaviour, so it
 belongs in a later release with its own testing, as part of the "align with Go
 and Terraform practices" pass.
 
+**The staticcheck job shows a red cross on every run, and that is deliberate
+for now -- but revisit it.** The mechanics, so nobody re-diagnoses them:
+`staticcheck ./...` exits non-zero whenever it reports anything, the non-zero
+exit fails the step, and a failed step renders the job red.
+`continue-on-error: true` only changes the *run's* conclusion, which stays
+`success`, and whether the job blocks a merge, which it does not -- a pull
+request sits at "unstable" and remains mergeable. The cross means "the 16
+known deprecations are still there", not "something broke".
+
+Kept as is on purpose: the debt stays visible rather than being quietly
+suppressed. The cost is real though, and worth weighing later. **A check that
+is permanently red trains people to ignore it**, and once ignored, a genuinely
+new finding in that job is invisible -- nobody would notice the count going
+from 16 to 17 without reading the log.
+
+When this is revisited, the shape to consider, already verified: SA1019 is the
+*only* failing check, and `staticcheck -checks 'inherit,-SA1019' ./...` exits
+0 with zero findings on this tree. So the job can be split --
+
+```yaml
+- name: Run staticcheck
+  run: staticcheck -checks 'inherit,-SA1019' ./...   # gates, must pass
+- name: Known SA1019 debt (non-blocking)
+  run: staticcheck -checks 'SA1019' ./... || true    # stays visible in the log
+```
+
+-- and `continue-on-error` dropped, which makes any *new* finding fail the job
+and mean something again. What that costs is catching newly introduced uses of
+deprecated APIs, which is why it is a trade rather than an obvious win, and why
+the natural moment for it is the "align with Go and Terraform practices" pass
+that re-enables SA1019 anyway by fixing the 16.
+
 **Watch the staticcheck version, because an old one reports a false all-clear.**
 v0.4.7 and v0.5.1 both report **zero** SA1019 on this tree -- not zero
 findings overall, they still return 177 with `-checks all`, they just do not
@@ -553,6 +585,9 @@ backported.
    exists it cannot run, and it is the test that matters most long term.
 6. Add tests as the need appears, not in advance. HA is the biggest known gap;
    a reboot-requiring update of a running VM is the second.
+7. Revisit the permanently red `staticcheck` job -- see "shows a red cross"
+   above. Not urgent, but it should not stay red indefinitely, because a check
+   nobody trusts is worth less than no check.
 
 ## Provider migration (Telmate -> fork), with OpenTofu
 
