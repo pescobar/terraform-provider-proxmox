@@ -8,17 +8,20 @@ They are **not active**: GitHub only runs workflows that sit directly in
 Parking them here disables them while keeping them readable, so each one can be
 adopted later on its own merits.
 
+`go.yml` and `release.yml` have since been **adopted** and now live in
+`.github/workflows/`, rewritten for the fork: `go.yml` targets `main` and adds
+`workflow_dispatch`, `release.yml` fires on the fork's own `v*` tags. Only the
+two below are still parked.
+
 | File                  | What it did upstream                                            | Why it is parked |
 | --------------------- | --------------------------------------------------------------- | ---------------- |
-| `go.yml`              | build, vet, staticcheck and unit tests on push/PR to `master`    | Worth adopting once the fork's branch names are settled; it is the only one with real value. |
-| `release.yml`         | GoReleaser on every `v*` tag, signs artifacts with a GPG key     | Would fire ~51 times if upstream tags are ever pushed, and fails without `GPG_PRIVATE_KEY` / `PASSPHRASE` secrets. Needs rewriting for the fork's own release process anyway. |
 | `manage_issues.yml`   | daily cron closing inactive issues                                | Upstream housekeeping for a busy public tracker. Irrelevant here. |
 | `dependabot.yml`      | weekly Go module update PRs                                       | The point of the fork is controlling when dependencies move. Chasing upstream bumps is the opposite of that. |
 
 To re-enable one:
 
 ```bash
-git mv .github/disabled-upstream/go.yml .github/workflows/go.yml
+git mv .github/disabled-upstream/manage_issues.yml .github/workflows/manage_issues.yml
 ```
 
 (`dependabot.yml` goes back to `.github/dependabot.yml`, not to `workflows/`.)

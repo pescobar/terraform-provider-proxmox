@@ -562,18 +562,27 @@ Either way an empty `tofu plan` after the switch is the acceptance criterion.
   To run the same tests under Terraform, swap the step for
   `hashicorp/setup-terraform` with `terraform_wrapper: false`.
 
-## Upstream automation is parked, not deleted
+## Upstream automation: two adopted, two still parked
 
-`.github/workflows/` contains **only** `acceptance-test.yml`. Everything
-inherited from upstream lives in `.github/disabled-upstream/`, which GitHub
-does not scan: `go.yml`, `release.yml`, `manage_issues.yml` and
-`dependabot.yml`. See the README there for what each one did and why it is off.
+`.github/workflows/` holds `acceptance-test.yml`, `go.yml` and `release.yml`.
+`.github/disabled-upstream/` still holds `manage_issues.yml` and
+`dependabot.yml`, which GitHub does not scan there. See the README in that
+directory for what each one did.
 
-This is deliberate. `release.yml` triggers on `v*` tags and would fire once per
-upstream tag (51 of them) and fail without the GPG secrets; `dependabot.yml`
-would start moving dependencies, which is precisely what the fork exists to
-control. `go.yml` (build, vet, staticcheck, unit tests) is the one worth
-adopting, once the fork's branch naming is settled.
+**Adopted**, both rewritten for the fork rather than taken as they were:
+
+* `go.yml` -- verify-dependencies, build, vet, staticcheck and unit tests, on
+  push and pull request against `main`, plus `workflow_dispatch` so a branch
+  that is not yet the default can still be built. `staticcheck` is
+  `continue-on-error` because of the 23 inherited SA1019 findings.
+* `release.yml` -- GoReleaser on `v*` tags, `contents: write`, needing the
+  `GPG_PRIVATE_KEY` and `PASSPHRASE` secrets. It fires on the fork's own tags;
+  the concern about upstream's 51 tags only applies if those are ever pushed
+  here, and they should not be.
+
+**Still parked, and staying that way:** `dependabot.yml` would start moving
+dependencies, which is precisely what the fork exists to control, and
+`manage_issues.yml` is housekeeping for a busy public tracker.
 
 The nightly schedule on `acceptance-test.yml` is enabled. It mainly keeps the
 cached images from being evicted after 7 days of disuse: a run that restores
