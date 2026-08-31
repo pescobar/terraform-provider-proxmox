@@ -62,12 +62,13 @@ Two things the rename shook out, both fixed:
   the job failed instantly. Anything else inherited from HEAD's workflows
   should be checked against rc5's Makefile the same way.
 
-**Known inherited debt: 23 `staticcheck` SA1019 findings**, confirmed exactly
-by run 33369112350:
+**Known inherited debt: 16 `staticcheck` SA1019 findings.** Run 33369112350
+measured 23; deleting the dead `resource_vm_qemu_test.go` cleared the 7 in it,
+which were `TestCase.Providers`, superseded by `ProviderFactories`. What is
+left is all shipping code:
 
 | File | Findings | What |
 | --- | --- | --- |
-| `resource_vm_qemu_test.go` | 7 | `TestCase.Providers`, superseded by `ProviderFactories` |
 | `resource_pool.go` | 4 | non-Context CRUD fields |
 | `resource_lxc_disk.go` | 4 | non-Context CRUD fields |
 | `resource_storage_iso.go` | 3 | non-Context CRUD fields |
@@ -81,8 +82,7 @@ still concludes success and a pull request stays mergeable ("unstable", not
 blocked) while the signal remains visible. **Do not fix them in the drop-in
 version**: moving to `CreateContext` changes cancellation behaviour, so it
 belongs in a later release with its own testing, as part of the "align with Go
-and Terraform practices" pass. The 7 in `resource_vm_qemu_test.go` are the
-cheapest to clear, since that file is dead code already.
+and Terraform practices" pass.
 
 **Watch the staticcheck version, because an old one reports a false all-clear.**
 v0.4.7 and v0.5.1 both report **zero** SA1019 on this tree -- not zero
@@ -167,9 +167,11 @@ API, no terraform) followed by a single provider level one
 (`TestAccProxmoxVmQemu_BasicCreate`). Widening to the full suite is a
 `testargs` input away, once booting is proven.
 
-**It applies unchanged to the rc5 fork:** `proxmox/resource_vm_qemu_test.go`
-and `proxmox/provider_test.go` are byte-identical between `v3.0.1-rc5` and
-HEAD, so the environment works on the rc5 branch as-is.
+**`resource_vm_qemu_test.go` has since been deleted.** It could not compile
+against the rc5 schema -- its fixtures still set the top level `iso` argument
+removed in `2808e32` -- so it was dead code that contributed 7 of the 23
+SA1019 findings and nothing else. What it covered is recorded under
+"Deferred", so the coverage ideas survive the file.
 
 **The infrastructure question is settled (run 33081184369, 2026-08-27).**
 GitHub hosted runners boot VMs three levels deep, on both target versions:
@@ -330,6 +332,12 @@ reason:
 * **Multi-node / `target_nodes`, PCI and USB passthrough, `efidisk` / OVMF,
   `args`, cloud-init, clone-from-template** -- none of these appear in the
   state we run, so there is nothing to regress yet.
+* **What the deleted upstream tests covered**, kept as a checklist rather than
+  as code, since none of it could run: basic create, a "standard" create with
+  more attributes set, clone from a source VM, clone with two disks, PXE
+  create, an update needing no reboot, and an update requiring one. PXE create
+  and both update shapes are covered now; clone is not, and does not appear in
+  the state we run.
 * **`format = "raw"`** -- 7 of 120 production disks. The test image's `local`
   is a `dir` storage, so qcow2 is the faithful default; raw would want an
   LVM-thin storage adding to the image.
@@ -561,9 +569,12 @@ Either way an empty `tofu plan` after the switch is the acceptance criterion.
   schema changes shipped with no migration path. Any breaking change we make in
   the fork must bring its own `SchemaVersion` + `StateUpgraders`, which is the
   main thing the fork can do better than upstream.
-* The acceptance tests hardcode the node name `testproxmox`
-  (`testAccProxmoxTargetNode`) and expect `local` storage to accept disk
-  images, a `local:iso/SpinRite.iso` and a `vmbr0` bridge.
+* The acceptance tests default to the node name `testproxmox` and expect
+  `local` storage to accept disk images, a `local:iso/SpinRite.iso`, and the
+  `vmbr0` and `vmbr1` bridges. In the fork's own tests every one of those is
+  an override (`PVE_TEST_NODE_NAME`, `PVE_TEST_STORAGE`, `PVE_TEST_BRIDGE`,
+  `PVE_TEST_BRIDGE2`, `PVE_TEST_ISO`) rather than a hardcoded constant, so the
+  suite can be pointed at a real cluster.
 * `main.go` hardcodes `registry.terraform.io/telmate/proxmox` as the default
   `-registry` flag for debug mode; the fork needs to change it.
 * `make clean` is `git clean -f -d`, and `build` depends on it. Untracked files
