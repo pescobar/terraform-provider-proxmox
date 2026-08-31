@@ -98,7 +98,7 @@ rm -f /etc/apt/sources.list.d/pve-enterprise.sources \
       /etc/apt/sources.list.d/ceph.sources \
       /etc/apt/sources.list.d/ceph.list
 
-log "creating the vmbr0 test bridge"
+log "creating the vmbr0 and vmbr1 test bridges"
 # A bridge with no ports: test VMs get a NIC and PVE is happy, but nothing the
 # tests create can reach the network the runner is on.
 #
@@ -106,7 +106,7 @@ log "creating the vmbr0 test bridge"
 # cloud image does not reliably source that directory, and a stanza that is
 # never read is exactly how vmbr0 came to be missing at boot while
 # networking.service still reported success.
-rm -f /etc/network/interfaces.d/vmbr0
+rm -f /etc/network/interfaces.d/vmbr0 /etc/network/interfaces.d/vmbr1
 
 add_bridge_stanza() { # add_bridge_stanza <file>
     local f=$1
@@ -120,6 +120,19 @@ add_bridge_stanza() { # add_bridge_stanza <file>
 auto vmbr0
 iface vmbr0 inet static
     address ${BRIDGE_CIDR}
+    bridge-ports none
+    bridge-stp off
+    bridge-fd 0
+EOF
+    fi
+    # A second bridge, so the tests can cover multi-interface VMs, which is
+    # the common case in real configurations.  It carries no address: nothing
+    # needs to reach it, PVE only has to accept it as a NIC target.
+    if ! grep -q 'iface vmbr1' "${f}"; then
+        cat >>"${f}" <<EOF
+
+auto vmbr1
+iface vmbr1 inet manual
     bridge-ports none
     bridge-stp off
     bridge-fd 0
@@ -156,6 +169,13 @@ else
     log "WARNING: could not bring vmbr0 up during the build (${ifup_out}); it is configured and will come up at boot"
 fi
 
+ifup vmbr1 >/dev/null 2>&1 || true
+if ip link show vmbr1 >/dev/null 2>&1; then
+    log "vmbr1 is up"
+else
+    log "WARNING: could not bring vmbr1 up during the build; it is configured and will come up at boot"
+fi
+
 log "allowing nested KVM for the guests the tests create"
 cat >/etc/modprobe.d/kvm-nested.conf <<'EOF'
 options kvm-intel nested=1
@@ -188,6 +208,12 @@ if ! grep -qs 'content.*images' /etc/pve/storage.cfg; then
     log "PVE_BUILD_FAIL: the local storage does not accept disk images"
     exit 1
 fi
+for br in vmbr0 vmbr1; do
+    if ! grep -qs "iface ${br}" /etc/network/interfaces /etc/network/interfaces.new; then
+        log "PVE_BUILD_FAIL: the ${br} bridge was not configured"
+        exit 1
+    fi
+done
 log "fixtures verified"
 
 log "installing the boot time bootstrap units"

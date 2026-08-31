@@ -250,7 +250,12 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 		"VM.Config.Network",
 		"VM.Config.Options",
 		"VM.Migrate",
-		"VM.Monitor",
+		// VM.Monitor is deliberately absent.  Proxmox VE 9 removed the
+		// privilege -- monitor access moved to Sys.Audit and guest agent
+		// operations to VM.GuestAgent -- so on PVE 9 it cannot be granted to
+		// anyone, root@pam included, and requiring it fails provider
+		// configuration outright rather than warning.  Backported from
+		// upstream e5c9963.
 		"VM.PowerMgmt",
 	}
 	var id string

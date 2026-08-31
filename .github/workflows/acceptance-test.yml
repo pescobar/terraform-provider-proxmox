@@ -13,9 +13,9 @@ on:
         default: '8.4'
         options: ['8.4', '9.2', 'both']
       testargs:
-        description: 'go test arguments. Defaults to a pattern that matches nothing, because the inherited acceptance tests cannot pass (see README).'
+        description: 'go test arguments. Defaults to the acceptance tests written for this fork. Note that TESTARGS is expanded unquoted by the Makefile, so it must not contain shell metacharacters -- no parentheses or pipes in a -run regex.'
         required: false
-        default: '-run=TestAccNothingYet'
+        default: '-run=TestAccFork'
       force_rebuild:
         description: 'Rebuild the Proxmox VE image instead of using the cached one'
         type: boolean
@@ -48,7 +48,7 @@ concurrency:
 env:
   GO_VERSION: '1.26'
   # Bump to invalidate the cached Proxmox images on purpose.
-  IMAGE_CACHE_EPOCH: '2'
+  IMAGE_CACHE_EPOCH: '3'
 
 permissions:
   contents: read
@@ -68,7 +68,11 @@ jobs:
           || github.event.inputs.pve_version == '9.2' && '[{"pve_major":"9","pve_version":"9.2"}]'
           || github.event.inputs.pve_version == 'both' && '[{"pve_major":"8","pve_version":"8.4"},{"pve_major":"9","pve_version":"9.2"}]'
           || '[{"pve_major":"8","pve_version":"8.4"}]') }}
-    name: Proxmox VE ${{ matrix.pve_version }}
+    # Names the workflow as well as the matrix leg.  In a pull request's
+    # checks list every workflow's jobs are shown flat, so a bare
+    # "Proxmox VE 8.4" sits next to build/vet/staticcheck/test from go.yml
+    # with nothing to say which box it belongs to.
+    name: Acceptance tests (Proxmox VE ${{ matrix.pve_version }})
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -169,7 +173,7 @@ jobs:
           PM_USER: root@pam
           PM_PASS: proxmox-acctest
           PM_TLS_INSECURE: 'true'
-        run: make acctest TESTARGS="-v -timeout 60m ${{ inputs.testargs || '-run=TestAccNothingYet' }}"
+        run: make acctest TESTARGS="-v -timeout 60m ${{ inputs.testargs || '-run=TestAccFork' }}"
 
       - name: Collect logs
         if: always()
