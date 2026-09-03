@@ -109,12 +109,38 @@ log "cluster is quorate"
 # there -- deprecated is not removed -- and groups are what this provider
 # knows how to set.  If that ever stops being true this is where it breaks,
 # loudly, rather than in a test.
-if ha-manager groupconfig 2>/dev/null | grep -q "^${HA_GROUP}\b"; then
+ha_group_exists() { ha-manager groupconfig 2>/dev/null | grep -q "^group:[[:space:]]*${HA_GROUP}\b"; }
+
+if ha_group_exists; then
     log "HA group ${HA_GROUP} already exists"
-elif ha-manager groupadd "${HA_GROUP}" --nodes "${NODE}" 2>/dev/null; then
-    log "created HA group ${HA_GROUP} on ${NODE}"
 else
-    log "WARNING: could not create HA group ${HA_GROUP} (groups may be gone on this PVE version)"
+    # ha-manager needs its own services up, not merely quorum, and those start
+    # after pve-cluster.  Retry rather than assume -- and never hide the
+    # error: the first version of this swallowed stderr and reported a bare
+    # "could not create", which said nothing about why it could not.
+    out=""
+    for attempt in $(seq 1 30); do
+        out=$(ha-manager groupadd "${HA_GROUP}" --nodes "${NODE}" 2>&1) && break
+        [ "${attempt}" = 1 ] && log "groupadd not ready yet: ${out}"
+        sleep 2
+    done
+
+    # Fall back to the file the HA manager reads.  `ha-manager groupadd` is a
+    # convenience over exactly this; the format is documented, and writing it
+    # works whether or not this version's CLI verb behaves as expected.
+    if ! ha_group_exists; then
+        log "groupadd did not take (${out}); writing /etc/pve/ha/groups.cfg directly"
+        mkdir -p /etc/pve/ha
+        printf 'group: %s\n\tnodes %s\n\tnofailback 0\n\trestricted 0\n\n' \
+            "${HA_GROUP}" "${NODE}" >>/etc/pve/ha/groups.cfg
+        sleep 3
+    fi
+
+    if ha_group_exists; then
+        log "created HA group ${HA_GROUP} on ${NODE}"
+    else
+        log "WARNING: HA group ${HA_GROUP} was not created; the HA test will fail and say why"
+    fi
 fi
 
-log "HA ready: $(ha-manager groupconfig 2>/dev/null | tr '\n' ' ' | head -c 200)"
+log "HA ready: groups=[$(ha-manager groupconfig 2>&1 | tr '\n' ' ' | head -c 200)]"
