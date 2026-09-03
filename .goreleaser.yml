@@ -52,5 +52,21 @@ release:
   # the checksums and the notes first, and to delete the whole thing silently
   # if the tag was wrong.
   draft: true
+  # Re-running a tag build replaces the draft rather than leaving two behind.
+  # Only safe because the release is a draft: it never touches something the
+  # registry has already served.
+  replace_existing_draft: true
+
 changelog:
-  disable: true
+  sort: asc
+  filters:
+    exclude:
+      # Merge commits are noise in a release note; the PR's own commits are
+      # already listed individually.
+      - "^Merge "
+      # Conventional-commit prefixes.  Nothing in this fork uses them yet --
+      # upstream did -- so these are inert today and there for backports and
+      # for whenever the fork adopts the convention.
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

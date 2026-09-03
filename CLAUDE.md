@@ -674,14 +674,31 @@ directory for what each one did.
   the concern about upstream's 51 tags only applies if those are ever pushed
   here, and they should not be.
 
-  **Releases are created as drafts** (`release.draft: true` in
-  `.goreleaser.yml`). Pushing a tag still builds and signs everything
+  **Releases are created as drafts** with a generated changelog
+  (`release.draft`, `changelog` in `.goreleaser.yml`). Pushing a tag still builds and signs everything
   unattended, but the release stays invisible until someone presses Publish in
   the web UI. That is the gate on the registry: the OpenTofu registry only
   sees published releases, and a version it has served cannot be withdrawn,
   only superseded. A draft can be checked over, or deleted silently if the tag
-  was wrong. Note that `v0.9.0` and `v0.9.1` were published before this
-  changed, so they went straight out.
+  was wrong. `replace_existing_draft` means re-running a tag build leaves one
+  draft rather than two, which is only safe because a draft is never something
+  the registry has already served. Note that `v0.9.0` and `v0.9.1` were
+  published before this changed, so they went straight out.
+
+  The changelog is generated from commit subjects, sorted oldest first, with
+  merge commits filtered out -- a merge adds nothing the individual commits do
+  not already say. The `^docs:` / `^test:` / `^chore:` filters are inert for
+  now: no commit in this fork uses conventional-commit prefixes, though
+  upstream does, so they matter for backports.
+
+  Two things from the reference config this was modelled on
+  (`scicore-unibas-ch/terraform-provider-apisix`) were deliberately **not**
+  copied. Its `extra_files` publishes a `terraform-registry-manifest.json`
+  declaring protocol 6.0, which is right for a Plugin Framework provider and
+  wrong here -- this one is SDK v2, protocol 5.0, and has no manifest, so the
+  glob would match nothing and fail the build. Its `mode: append` was also left
+  out, since `replace_existing_draft` already covers re-runs and the two pull
+  in opposite directions.
 
 **Still parked, and staying that way:** `dependabot.yml` would start moving
 dependencies, which is precisely what the fork exists to control, and
