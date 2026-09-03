@@ -42,5 +42,15 @@ signs:
       - "--detach-sign"
       - "${artifact}"
 release:
+  # Publish as a draft.  The tag build still runs unattended and uploads every
+  # signed artifact, but the release stays invisible until a human presses
+  # Publish in the web UI.
+  #
+  # That gate matters here because a published release is what the OpenTofu
+  # registry picks up, and a version cannot be unpublished once consumers have
+  # resolved it -- only superseded.  A draft leaves room to check the assets,
+  # the checksums and the notes first, and to delete the whole thing silently
+  # if the tag was wrong.
+  draft: true
 changelog:
   disable: true

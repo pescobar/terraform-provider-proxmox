@@ -674,6 +674,15 @@ directory for what each one did.
   the concern about upstream's 51 tags only applies if those are ever pushed
   here, and they should not be.
 
+  **Releases are created as drafts** (`release.draft: true` in
+  `.goreleaser.yml`). Pushing a tag still builds and signs everything
+  unattended, but the release stays invisible until someone presses Publish in
+  the web UI. That is the gate on the registry: the OpenTofu registry only
+  sees published releases, and a version it has served cannot be withdrawn,
+  only superseded. A draft can be checked over, or deleted silently if the tag
+  was wrong. Note that `v0.9.0` and `v0.9.1` were published before this
+  changed, so they went straight out.
+
 **Still parked, and staying that way:** `dependabot.yml` would start moving
 dependencies, which is precisely what the fork exists to control, and
 `manage_issues.yml` is housekeeping for a busy public tracker.
