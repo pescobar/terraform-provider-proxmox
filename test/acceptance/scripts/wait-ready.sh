@@ -42,6 +42,17 @@ while [ "$(date +%s)" -lt "${deadline}" ]; do
             log "the image was built without it; rebuild (bump IMAGE_CACHE_EPOCH in CI)"
             exit 1
         fi
+    elif ! api_get "/cluster/ha/groups" "${ticket}" | grep -q "${HA_GROUP}"; then
+        # The cluster is created on first boot rather than baked into the
+        # image, so unlike the other fixtures this one legitimately takes a
+        # while: corosync has to come up and reach quorum first.
+        last="the HA group ${HA_GROUP} is missing (cluster not up yet?)"
+        node_up_since=${node_up_since:-$(date +%s)}
+        if [ $(( $(date +%s) - node_up_since )) -ge 300 ]; then
+            log "node ${NODE_NAME} is online but ${last}"
+            log "check 'pvecm status' and 'journalctl -u pve-test-bootstrap' in the VM"
+            exit 1
+        fi
     elif ! api_get "/nodes/${NODE_NAME}/storage/local/content" "${ticket}" | grep -q "SpinRite.iso"; then
         last="the fixtures are missing (local:iso/SpinRite.iso)"
         # The node answering means Proxmox is up; the fixtures are baked into

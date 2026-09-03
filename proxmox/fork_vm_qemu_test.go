@@ -269,3 +269,52 @@ func TestAccForkVmQemu_StoppedState(t *testing.T) {
 		},
 	})
 }
+
+// TestAccForkVmQemu_HighAvailability covers hastate and hagroup, which are the
+// most used non-default attributes in the configurations this provider serves
+// -- 69 of 70 guests in the state profiled for this suite set hastate, and 65
+// set hagroup -- and which nothing else here touches.
+//
+// It needs a quorate cluster, so the test image creates a single node one on
+// first boot (see test/acceptance/guest/pve-test-bootstrap.sh). Nothing fails
+// over with one node, but every API call the provider makes is the same.
+//
+// Two things are under test, and the second is the interesting one:
+//
+//   - the HA resource is really registered with the cluster, checked against
+//     the API rather than against state, because the provider writes hastate
+//     and hagroup from configuration during create and state would agree with
+//     itself either way;
+//   - re-planning the same configuration produces no diff. rc5 never calls
+//     ReadVMHA, so vmr.HaState() and vmr.HaGroup() are only populated by the
+//     create or update that just ran -- a later refresh in a fresh process may
+//     read both back empty and show a permanent diff on every HA guest.
+//     Upstream added the missing call in 998a5f5, months after rc5.
+func TestAccForkVmQemu_HighAvailability(t *testing.T) {
+	cfg := forkBaseVM(forkVMName())
+	cfg.HAState = "started"
+	cfg.HAGroup = forkHAGroup()
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { forkPreCheck(t) },
+		ProviderFactories: forkProviderFactories(),
+		CheckDestroy:      forkCheckVMsDestroyed,
+		Steps: []resource.TestStep{
+			{
+				Config: cfg.hcl(),
+				Check: resource.ComposeTestCheckFunc(
+					forkCheckVMExists(forkVMResource),
+					forkCheckHAResource(forkVMResource, cfg.HAGroup),
+					resource.TestCheckResourceAttr(forkVMResource, "hastate", "started"),
+					resource.TestCheckResourceAttr(forkVMResource, "hagroup", cfg.HAGroup),
+				),
+			},
+			{
+				// The regression net: if the read path does not repopulate
+				// hastate and hagroup, this is where it shows.
+				Config:   cfg.hcl(),
+				PlanOnly: true,
+			},
+		},
+	})
+}

@@ -3,6 +3,7 @@ package proxmox
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -45,6 +46,7 @@ func forkStorage() string { return forkEnv("PVE_TEST_STORAGE", "local") }
 func forkBridge() string  { return forkEnv("PVE_TEST_BRIDGE", "vmbr0") }
 func forkBridge2() string { return forkEnv("PVE_TEST_BRIDGE2", "vmbr1") }
 func forkISO() string     { return forkEnv("PVE_TEST_ISO", "local:iso/SpinRite.iso") }
+func forkHAGroup() string { return forkEnv("PVE_TEST_HA_GROUP", "acctest-ha") }
 
 // forkVMName returns a unique, DNS safe name.  Proxmox rejects anything else.
 func forkVMName() string {
@@ -201,6 +203,11 @@ type forkVM struct {
 	SecondDisk bool // a second data disk on virtio1
 	CDROM      bool // a cdrom on ide2
 	SecondNIC  bool // a second interface on the secondary bridge
+
+	// HA needs a quorate cluster, which the test image builds on first boot.
+	// Empty means the attribute is left out of the configuration entirely.
+	HAState string
+	HAGroup string
 }
 
 // forkBaseVM is the shape the fork has to keep working: a PXE booted VM with
@@ -283,6 +290,13 @@ resource "proxmox_vm_qemu" "test" {
 	}
 	b.WriteString("  }\n")
 
+	if v.HAState != "" {
+		fmt.Fprintf(&b, "\n  hastate = %q\n", v.HAState)
+	}
+	if v.HAGroup != "" {
+		fmt.Fprintf(&b, "  hagroup = %q\n", v.HAGroup)
+	}
+
 	fmt.Fprintf(&b, "\n  network {\n    id     = 0\n    model  = \"virtio\"\n    bridge = %q\n  }\n", forkBridge())
 	if v.SecondNIC {
 		fmt.Fprintf(&b, "\n  network {\n    id     = 1\n    model  = \"virtio\"\n    bridge = %q\n  }\n", forkBridge2())
@@ -290,4 +304,33 @@ resource "proxmox_vm_qemu" "test" {
 
 	b.WriteString("}\n")
 	return b.String()
+}
+
+// forkCheckHAResource asserts the guest is registered with the HA manager, and
+// that its group matches.  State saying so is not enough: the provider writes
+// hastate and hagroup from configuration during create, so only the cluster
+// can confirm the call actually landed.
+func forkCheckHAResource(name, wantGroup string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		vmID, err := forkVMIDFromState(s, name)
+		if err != nil {
+			return err
+		}
+		client, err := forkAPIClient()
+		if err != nil {
+			return err
+		}
+		raw, err := client.GetItemConfigMapStringInterface(
+			"/cluster/ha/resources/vm:"+strconv.Itoa(vmID), "ha", "config")
+		if err != nil {
+			return fmt.Errorf("vm %d is not an HA resource: %w", vmID, err)
+		}
+		if wantGroup != "" {
+			got, _ := raw["group"].(string)
+			if got != wantGroup {
+				return fmt.Errorf("vm %d is in HA group %q, want %q", vmID, got, wantGroup)
+			}
+		}
+		return nil
+	}
 }

@@ -5,9 +5,18 @@
 #
 #   * the "local" storage has to accept disk images, not just ISOs
 #   * "local:iso/SpinRite.iso" has to be there
+#   * a single node corosync cluster, and an HA group inside it
 #
 # Runs once while the image is built, and again on every boot as a safety net.
 # Everything below is idempotent.
+#
+# The cluster is the exception: it is created on boot only, never during the
+# image build.  `pvecm create` writes the node's current IP into
+# corosync.conf, and that address is not the same one the image gets when it
+# is booted for testing -- which is the whole reason pve-test-hosts exists.  A
+# corosync.conf pinned to a stale address leaves pmxcfs without quorum and
+# read-only, so every later fixture write fails.  PVE_TEST_PHASE=build skips
+# it; systemd runs this with no phase set and gets the cluster.
 #
 set -euo pipefail
 
@@ -55,3 +64,57 @@ if [ ! -s "${ISO_DIR}/SpinRite.iso" ]; then
 fi
 
 log "ready: $(wc -c <"${ISO_DIR}/SpinRite.iso") byte ISO, local storage accepts images"
+
+# --- single node cluster, so that HA works at all -------------------------
+
+CLUSTER_NAME=${PVE_TEST_CLUSTER_NAME:-acctest}
+HA_GROUP=${PVE_TEST_HA_GROUP:-acctest-ha}
+NODE=$(hostname)
+
+if [ "${PVE_TEST_PHASE:-boot}" = "build" ]; then
+    log "build phase: skipping cluster creation, it is a boot time step"
+    exit 0
+fi
+
+if [ -f /etc/pve/corosync.conf ]; then
+    log "already clustered as $(awk -F: '/cluster_name/{print $2}' /etc/pve/corosync.conf | tr -d ' ')"
+else
+    log "creating the single node cluster ${CLUSTER_NAME} on ${NODE}"
+    # -link0 pinned to the address pve-test-hosts just wrote, so corosync binds
+    # to the interface the node actually answers on rather than guessing.
+    link=$(awk -v n="${NODE}" '$2==n || $3==n {print $1; exit}' /etc/hosts)
+    if [ -n "${link}" ] && [ "${link}" != "127.0.0.1" ]; then
+        pvecm create "${CLUSTER_NAME}" --link0 "${link}" || log "pvecm create failed"
+    else
+        pvecm create "${CLUSTER_NAME}" || log "pvecm create failed"
+    fi
+fi
+
+# Quorum does not arrive the instant pvecm returns; ha-manager refuses
+# everything until it does.
+for _ in $(seq 1 60); do
+    pvecm status 2>/dev/null | grep -qi 'Quorate:.*Yes' && break
+    sleep 2
+done
+if ! pvecm status 2>/dev/null | grep -qi 'Quorate:.*Yes'; then
+    log "WARNING: cluster is not quorate; HA fixtures will not be created"
+    exit 0
+fi
+log "cluster is quorate"
+
+# The HA group the tests attach guests to.
+#
+# Proxmox VE 9 deprecated HA groups in favour of node affinity rules and
+# migrates existing ones on upgrade, but `ha-manager groupadd` still works
+# there -- deprecated is not removed -- and groups are what this provider
+# knows how to set.  If that ever stops being true this is where it breaks,
+# loudly, rather than in a test.
+if ha-manager groupconfig 2>/dev/null | grep -q "^${HA_GROUP}\b"; then
+    log "HA group ${HA_GROUP} already exists"
+elif ha-manager groupadd "${HA_GROUP}" --nodes "${NODE}" 2>/dev/null; then
+    log "created HA group ${HA_GROUP} on ${NODE}"
+else
+    log "WARNING: could not create HA group ${HA_GROUP} (groups may be gone on this PVE version)"
+fi
+
+log "HA ready: $(ha-manager groupconfig 2>/dev/null | tr '\n' ' ' | head -c 200)"

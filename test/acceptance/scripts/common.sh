@@ -28,6 +28,14 @@ VM_DISK=${PVE_TEST_DISK:-32G}
 # Address of the port-less vmbr0 bridge inside the VM, used by the PXE test.
 BRIDGE_CIDR=${PVE_TEST_BRIDGE_CIDR:-10.10.10.1/24}
 
+# A single node cluster, so ha-manager answers at all.  HA is the most used
+# non-default attribute in the configurations this provider actually serves,
+# and it needs corosync quorum before any of it works -- a standalone node
+# rejects every HA call.  One node is quorate on its own; nothing fails over,
+# but the API surface the provider drives is the same.
+CLUSTER_NAME=${PVE_TEST_CLUSTER_NAME:-acctest}
+HA_GROUP=${PVE_TEST_HA_GROUP:-acctest-ha}
+
 # Which Proxmox VE major version to build.  Production is on 8 and the target
 # is 9, so both are buildable and the two images can coexist.
 PVE_VERSION=${PVE_TEST_PVE_VERSION:-9}

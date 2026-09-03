@@ -193,7 +193,10 @@ install -m 0755 /root/pve-test-bootstrap.sh /usr/local/sbin/pve-test-bootstrap
 # completes on this image, so the unit silently never ran while the API itself
 # was perfectly healthy.  Baking the fixtures into the image removes the
 # ordering question entirely.
-if ! /usr/local/sbin/pve-test-bootstrap; then
+# PVE_TEST_PHASE=build: create the storage and ISO fixtures now, but not the
+# cluster.  pvecm create would pin corosync.conf to the build time IP, which is
+# not the address the image answers on once it is booted for testing.
+if ! PVE_TEST_PHASE=build /usr/local/sbin/pve-test-bootstrap; then
     log "PVE_BUILD_FAIL: could not create the test fixtures"
     exit 1
 fi
@@ -211,6 +214,15 @@ fi
 for br in vmbr0 vmbr1; do
     if ! grep -qs "iface ${br}" /etc/network/interfaces /etc/network/interfaces.new; then
         log "PVE_BUILD_FAIL: the ${br} bridge was not configured"
+        exit 1
+    fi
+done
+# The cluster itself is created at boot, but the tools for it have to be in the
+# image, and a missing ha-manager would only show up as a failing HA test much
+# later.
+for tool in pvecm ha-manager; do
+    if ! command -v "${tool}" >/dev/null 2>&1; then
+        log "PVE_BUILD_FAIL: ${tool} is not installed"
         exit 1
     fi
 done
@@ -246,11 +258,15 @@ Type=oneshot
 RemainAfterExit=yes
 StandardOutput=journal+console
 StandardError=journal+console
+Environment=PVE_TEST_CLUSTER_NAME=__CLUSTER_NAME__
+Environment=PVE_TEST_HA_GROUP=__HA_GROUP__
 ExecStart=/usr/local/sbin/pve-test-bootstrap
 
 [Install]
 WantedBy=multi-user.target
 EOF
+sed -i "s/__CLUSTER_NAME__/${CLUSTER_NAME:-acctest}/; s/__HA_GROUP__/${HA_GROUP:-acctest-ha}/" \
+    /etc/systemd/system/pve-test-bootstrap.service
 systemctl enable pve-test-hosts.service pve-test-bootstrap.service
 
 # Nothing here should ever phone home or update itself mid test run.
