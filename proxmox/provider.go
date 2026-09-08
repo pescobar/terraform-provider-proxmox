@@ -200,6 +200,7 @@ func Provider() *schema.Provider {
 			"proxmox_pool":            resourcePool(),
 			"proxmox_cloud_init_disk": resourceCloudInitDisk(),
 			"proxmox_storage_iso":     resourceStorageIso(),
+			"proxmox_ha_rule":         resourceHaRule(),
 			// TODO - proxmox_bridge
 			// TODO - proxmox_vm_qemu_template
 		},
