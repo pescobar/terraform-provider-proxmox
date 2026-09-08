@@ -834,6 +834,18 @@ without repository activity. Nothing in the workflow needs to change for the
 switch. The `PM_PASS` in it is deliberate, not a leaked secret: it is the root
 password of a throwaway VM that only ever listens on the runner's loopback.
 
+## Documentation
+
+`docs/` is in the layout the OpenTofu and Terraform registries read:
+`docs/index.md` for the provider, `docs/resources/<name>.md` per resource,
+`docs/guides/` for the rest. A resource with no page there is published with no
+documentation, so a new resource is not finished until its page exists.
+
+`proxmox_ha_rule` has one. Three inherited from upstream still do not:
+`proxmox_ha_groups` (a data source), `proxmox_lxc_disk` and
+`proxmox_storage_iso`. They were undocumented at rc5 and remain so; worth
+fixing, but not caused by the fork.
+
 ## Conventions
 
 * Fork base is `v3.0.1-rc5`. Every deviation from it should be a small, single
@@ -841,6 +853,8 @@ password of a throwaway VM that only ever listens on the runner's loopback.
   auditable.
 * Breaking schema changes require `SchemaVersion` + `StateUpgraders`. No
   exceptions; this is the reason the fork exists.
+* A new resource ships with a `docs/resources/<name>.md` page. The registry
+  publishes what is in that directory and nothing else.
 * New tooling lives in `test/`, not in `proxmox/`, to keep the diff against
   upstream legible. Go acceptance tests are the exception, since they have to
   be in `package proxmox`; those are named `fork_*_test.go` instead.
