@@ -685,9 +685,14 @@ backported.
 4. Rehearse the state migration on a copy of a production state file and
    confirm `tofu plan` is empty. Do this **while still on Proxmox 8** -- see
    "Migration ordering" above.
-5. Cut `0.9.0`, then set `PVE_TEST_PREVIOUS_VERSION` so
-   `TestAccForkUpgrade_FromPreviousRelease` stops skipping. Until a release
-   exists it cannot run, and it is the test that matters most long term.
+5. Run `TestAccForkUpgrade_FromPreviousRelease`, now that there are releases
+   to upgrade between. Dispatch the acceptance workflow with
+   `previous_version: 0.9.1` -- the input is wired to
+   `PVE_TEST_PREVIOUS_VERSION`, and the test skips when it is empty, which is
+   why scheduled runs are unaffected. **The version has to be published, not
+   merely tagged**: the test installs it from the registry, and a draft
+   release is invisible there. It is the test that matters most long term --
+   every release proving it reads what its predecessor wrote.
 6. Add tests as the need appears, not in advance. HA is the biggest known gap;
    a reboot-requiring update of a running VM is the second.
 7. Revisit the permanently red `staticcheck` job -- see "shows a red cross"

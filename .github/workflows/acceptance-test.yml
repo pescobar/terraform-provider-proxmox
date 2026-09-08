@@ -21,6 +21,10 @@ on:
         type: boolean
         required: false
         default: false
+      previous_version:
+        description: 'Published version of this fork to test the upgrade from, e.g. 0.9.1. Enables TestAccForkUpgrade_FromPreviousRelease, which skips when empty. The version must already be published to the registry, not merely tagged: the test installs it from there.'
+        required: false
+        default: ''
   # Nightly, mostly to keep the cached images alive: GitHub evicts caches that
   # go unused for 7 days, and rebuilding both images costs ~20 minutes against
   # ~6 for a run that restores them.
@@ -215,6 +219,12 @@ jobs:
           PM_USER: root@pam
           PM_PASS: proxmox-acctest
           PM_TLS_INSECURE: 'true'
+          # Empty on scheduled runs and when the input is left blank, which is
+          # what makes TestAccForkUpgrade_FromPreviousRelease skip rather than
+          # fail.  Set it to the previous published version to exercise the
+          # guarantee the fork exists for: that a release reads state written
+          # by its predecessor.
+          PVE_TEST_PREVIOUS_VERSION: ${{ inputs.previous_version || '' }}
         run: make acctest TESTARGS="-v -timeout 45m ${{ inputs.testargs || '-run=TestAccFork' }}"
 
       - name: Collect logs
