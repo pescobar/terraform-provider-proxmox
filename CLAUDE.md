@@ -562,6 +562,57 @@ and under pressure.
 
 The rehearsal test skips itself on PVE 9 rather than pretending otherwise.
 
+#### The 8 -> 9 upgrade strips `group` from every HA resource
+
+Measured on a real cluster that was upgraded, not inferred. Proxmox converts
+each HA group into a node-affinity rule, and the guest side of the association
+does **not** survive: every HA resource comes back with no group at all.
+
+```
+$ curl -sSk ... "$PVE/cluster/ha/resources" | jq -r '.data[] | "\(.sid) \(.state) group=\(.group // "-")"'
+vm:121  started group=-
+vm:601  started group=-
+...                       # all 20, without exception
+```
+
+Membership moved into the rule's `resources` list instead, and the rules carry
+generated identifiers -- `ha-rule-6e12c05d-c269` -- with the old group name
+left only in `comment`. Those identifiers are minted during the upgrade, so
+they differ per cluster and cannot be written in advance.
+
+`hastate` is unaffected: all twenty still read `started`. Only `hagroup` is
+lost.
+
+**This creates a trap, and the drift runs the opposite way to intuition.**
+The provider reads `hagroup` from `vmr.HaGroup()`, which now returns nothing,
+so the first refresh after the upgrade blanks it in state on every guest.
+Configuration still says `hagroup = "HA_Balanced"`, so the plan wants to put
+the group *back*, and `ha-manager groupadd` still works on Proxmox 9 --
+deprecated is not removed, confirmed by the test image's own fixture. Applying
+that plan would recreate the group beside the converted rule, leaving two
+mechanisms claiming the same guests, which is the thing the conversion exists
+to end.
+
+So the order is not optional:
+
+1. Upgrade Proxmox 8 -> 9.
+2. **Remove `hagroup` from the configuration before the first apply.** Keep
+   `hastate`.
+3. `tofu plan` and check it is in-place updates and nothing else.
+4. `tofu apply`. Each call is `UpdateVMHA(vmr, "started", "")`, which already
+   matches the cluster, so state reconciles without touching anything.
+5. Import the rules into `proxmox_ha_rule`.
+
+Between 1 and 2 there is a window in which a stray apply does the wrong thing.
+Do not let automation apply during it.
+
+Two things to expect in the output. Guests that were in no group before the
+upgrade stay HA-managed and belong to no rule -- six of the twenty above --
+and need no import. And a rule may reference a guest that is not an HA
+resource at all (`vm:606` in that cluster), which the API permits; it is a
+dangling reference left by a guest removed after the group was defined, and it
+will show up in whatever configuration is written for that rule.
+
 ### Next
 
 Done since this was last written: the suite runs green on both versions, the
