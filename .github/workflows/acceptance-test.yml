@@ -192,17 +192,27 @@ jobs:
             exit 0
           fi
 
+          # Say what was found before acting.  A step that deletes things and
+          # succeeds silently is indistinguishable from one that quietly did
+          # nothing, which is exactly the ambiguity this had on its first run.
+          echo "current key: ${CURRENT}"
+          echo "caches with this prefix:"
+          echo "${keys}" | sed 's/^/  /'
+
           # Scoped to this matrix leg's prefix, so the 8.4 job cannot delete
           # the 9.2 image.
+          pruned=0
           while read -r id key; do
             [ -z "${id:-}" ] && continue
             [ "${key}" = "${CURRENT}" ] && continue
             if gh api -X DELETE "repos/${{ github.repository }}/actions/caches/${id}" >/dev/null 2>&1; then
               echo "pruned superseded cache ${key}"
+              pruned=$((pruned + 1))
             else
               echo "could not prune ${key} (continuing)"
             fi
           done <<<"${keys}"
+          echo "pruned ${pruned} superseded cache(s); kept ${CURRENT}"
 
       - name: Start Proxmox VE
         run: ./test/acceptance/scripts/start.sh
