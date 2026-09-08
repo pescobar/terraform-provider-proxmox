@@ -109,37 +109,39 @@ log "cluster is quorate"
 # there -- deprecated is not removed -- and groups are what this provider
 # knows how to set.  If that ever stops being true this is where it breaks,
 # loudly, rather than in a test.
-ha_group_exists() { ha-manager groupconfig 2>/dev/null | grep -q "^group:[[:space:]]*${HA_GROUP}\b"; }
+# Proxmox 9 refuses to create HA groups at all -- "cannot create group: ha
+# groups have been migrated to rules" -- and refuses to assign a guest to one,
+# with a 500 on the `group` parameter.  Node affinity is expressed with
+# proxmox_ha_rule there, which needs no fixture: the test creates its own rule.
+#
+# An earlier version of this wrote /etc/pve/ha/groups.cfg directly when
+# groupadd failed.  That produced a group which `ha-manager groupconfig` lists
+# and which nothing can be assigned to, and it hid the real behaviour behind a
+# fixture that looked like it had worked.  Do not reinstate that fallback.
+PVE_MAJOR=$(pveversion 2>/dev/null | sed -n 's#^pve-manager/\([0-9]\+\).*#\1#p' | head -1)
+: "${PVE_MAJOR:=0}"
 
-if ha_group_exists; then
-    log "HA group ${HA_GROUP} already exists"
+if [ "${PVE_MAJOR}" -ge 9 ]; then
+    log "Proxmox ${PVE_MAJOR}: skipping the HA group, groups are gone here and rules replace them"
 else
-    # ha-manager needs its own services up, not merely quorum, and those start
-    # after pve-cluster.  Retry rather than assume -- and never hide the
-    # error: the first version of this swallowed stderr and reported a bare
-    # "could not create", which said nothing about why it could not.
-    out=""
-    for attempt in $(seq 1 30); do
-        out=$(ha-manager groupadd "${HA_GROUP}" --nodes "${NODE}" 2>&1) && break
-        [ "${attempt}" = 1 ] && log "groupadd not ready yet: ${out}"
-        sleep 2
-    done
-
-    # Fall back to the file the HA manager reads.  `ha-manager groupadd` is a
-    # convenience over exactly this; the format is documented, and writing it
-    # works whether or not this version's CLI verb behaves as expected.
-    if ! ha_group_exists; then
-        log "groupadd did not take (${out}); writing /etc/pve/ha/groups.cfg directly"
-        mkdir -p /etc/pve/ha
-        printf 'group: %s\n\tnodes %s\n\tnofailback 0\n\trestricted 0\n\n' \
-            "${HA_GROUP}" "${NODE}" >>/etc/pve/ha/groups.cfg
-        sleep 3
-    fi
-
+    ha_group_exists() { ha-manager groupconfig 2>/dev/null | grep -q "^group:[[:space:]]*${HA_GROUP}\b"; }
     if ha_group_exists; then
-        log "created HA group ${HA_GROUP} on ${NODE}"
+        log "HA group ${HA_GROUP} already exists"
     else
-        log "WARNING: HA group ${HA_GROUP} was not created; the HA test will fail and say why"
+        # ha-manager's own services start after pve-cluster, so quorum alone
+        # does not mean groupadd will be accepted yet.  Retry, and log what it
+        # actually said rather than hiding stderr.
+        out=""
+        for attempt in $(seq 1 30); do
+            out=$(ha-manager groupadd "${HA_GROUP}" --nodes "${NODE}" 2>&1) && break
+            [ "${attempt}" = 1 ] && log "groupadd not ready yet: ${out}"
+            sleep 2
+        done
+        if ha_group_exists; then
+            log "created HA group ${HA_GROUP} on ${NODE}"
+        else
+            log "WARNING: HA group ${HA_GROUP} was not created (${out}); the HA test will fail and say why"
+        fi
     fi
 fi
 

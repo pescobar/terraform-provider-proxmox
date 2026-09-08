@@ -596,17 +596,32 @@ lost.
 The provider reads `hagroup` from `vmr.HaGroup()`, which now returns nothing,
 so the first refresh after the upgrade blanks it in state on every guest.
 Configuration still says `hagroup = "HA_Balanced"`, so the plan wants to put
-the group *back*, and `ha-manager groupadd` still works on Proxmox 9 --
-deprecated is not removed, confirmed by the test image's own fixture. Applying
-that plan would recreate the group beside the converted rule, leaving two
-mechanisms claiming the same guests, which is the thing the conversion exists
-to end.
+the group *back*.
+
+**And Proxmox 9 refuses.** Measured, after an earlier note here claimed the
+opposite:
+
+```
+Error: 500 invalid parameter 'group': ha groups have been migrated to rules
+```
+
+Groups are not merely deprecated on 9, they are unusable. `ha-manager
+groupadd` fails the same way (`cannot create group: ha groups have been
+migrated to rules`), and so does assigning a guest to one through the API.
+The earlier claim that groupadd still worked came from reading an 8.4 log and
+generalising; on 9 it does not.
+
+So the failure after the upgrade is loud rather than silent, which is the
+better of the two outcomes: `tofu apply` errors on every guest that still
+names a group, instead of quietly recreating one beside the converted rule.
+Removing `hagroup` is therefore not advisable, it is required.
 
 So the order is not optional:
 
 1. Upgrade Proxmox 8 -> 9.
 2. **Remove `hagroup` from the configuration before the first apply.** Keep
-   `hastate`.
+   `hastate`; only the group attribute is rejected. Without this the apply
+   fails outright on every guest that still names a group.
 3. `tofu plan` and check it is in-place updates and nothing else.
 4. `tofu apply`. Each call is `UpdateVMHA(vmr, "started", "")`, which already
    matches the cluster, so state reconciles without touching anything.

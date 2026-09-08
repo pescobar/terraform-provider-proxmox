@@ -293,7 +293,16 @@ func TestAccForkVmQemu_StoppedState(t *testing.T) {
 func TestAccForkVmQemu_HighAvailability(t *testing.T) {
 	cfg := forkBaseVM(forkVMName())
 	cfg.HAState = "started"
-	cfg.HAGroup = forkHAGroup()
+
+	// hagroup only on Proxmox 8.  Nine rejects assigning a guest to a group
+	// outright -- "500 invalid parameter 'group': ha groups have been migrated
+	// to rules" -- so the attribute is unusable there, not merely deprecated.
+	// Node affinity on 9 belongs to proxmox_ha_rule, which TestAccForkHaRule
+	// covers.  This is the same change a real cluster needs after the upgrade:
+	// drop hagroup, keep hastate.
+	if forkEnv("PVE_TEST_PVE_VERSION", "") != "9" {
+		cfg.HAGroup = forkHAGroup()
+	}
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { forkPreCheck(t) },
@@ -313,6 +322,8 @@ func TestAccForkVmQemu_HighAvailability(t *testing.T) {
 					resource.TestCheckResourceAttr(forkVMResource, "hastate", "started"),
 					resource.TestCheckResourceAttr(forkVMResource, "hagroup", cfg.HAGroup),
 				),
+				// cfg.HAGroup is "" on Proxmox 9, so the assertion above
+				// checks the attribute is absent there, which is the point.
 			},
 			{
 				// The regression net: if the read path does not repopulate
