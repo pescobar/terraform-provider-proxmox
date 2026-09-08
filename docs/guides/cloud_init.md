@@ -1,5 +1,19 @@
 # Cloud Init Guide
 
+> **These examples predate the current schema and will not apply.**
+>
+> They use the flat `storage` / `disk_gb` / `nic` / `bridge` arguments and the
+> `disk { storage_type = ... }` and `preprovision` forms, all of which were
+> removed from `proxmox_vm_qemu` before `v3.0.1-rc5`, the base this provider is
+> forked from. Applying them gives `An argument named "disk_gb" is not expected
+> here`.
+>
+> The prose about cloud-init itself still holds. For configuration that matches
+> the current schema -- the `disks` and `network` blocks -- see
+> [proxmox_vm_qemu](../resources/vm_qemu.md). Rewriting these examples is
+> tracked as outstanding work; they have not been rewritten here because none
+> of them has been verified against a live cluster.
+
 Proxmox has support for Cloud-Init, which allows changing settings in the guest when deploying. This is important
 because you'll want to make sure the settings in your VM do not match the base image, or you'll have IP conflicts,
 duplicate SSH host keys, SSH keys in authorized_keys files that you probably don't want in there and so forth.

@@ -1,10 +1,21 @@
 # Proxmox Provider
 
 A Terraform provider is responsible for understanding API interactions and exposing resources. The Proxmox provider uses
-the Proxmox API. This provider exposes [proxmox_vm_qemu](resources/vm_qemu.md),
-[proxmox_lxc](resources/lxc.md), [proxmox_pool](resources/pool.md),
-[proxmox_cloud_init_disk](resources/cloud_init_disk.md) and, on Proxmox VE 9 or
-newer, [proxmox_ha_rule](resources/ha_rule.md).
+the Proxmox API.
+
+**Resources**
+
+* [proxmox_vm_qemu](resources/vm_qemu.md) -- QEMU virtual machines
+* [proxmox_lxc](resources/lxc.md) -- LXC containers
+* [proxmox_lxc_disk](resources/lxc_disk.md) -- extra mount points for a container
+* [proxmox_pool](resources/pool.md) -- VM and container pools
+* [proxmox_cloud_init_disk](resources/cloud_init_disk.md) -- cloud-init images
+* [proxmox_storage_iso](resources/storage_iso.md) -- ISO images downloaded onto a storage
+* [proxmox_ha_rule](resources/ha_rule.md) -- HA rules, Proxmox VE 9 or newer
+
+**Data sources**
+
+* [proxmox_ha_groups](data-sources/ha_groups.md) -- HA groups, Proxmox VE 8 and earlier
 
 ## Creating the Proxmox user and role for terraform
 

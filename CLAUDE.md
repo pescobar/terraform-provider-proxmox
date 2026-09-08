@@ -841,10 +841,30 @@ password of a throwaway VM that only ever listens on the runner's loopback.
 `docs/guides/` for the rest. A resource with no page there is published with no
 documentation, so a new resource is not finished until its page exists.
 
-`proxmox_ha_rule` has one. Three inherited from upstream still do not:
-`proxmox_ha_groups` (a data source), `proxmox_lxc_disk` and
-`proxmox_storage_iso`. They were undocumented at rc5 and remain so; worth
-fixing, but not caused by the fork.
+Every registered resource and data source now has a page: the three that were
+missing -- `proxmox_ha_groups` (a data source, so under `docs/data-sources/`),
+`proxmox_lxc_disk` and `proxmox_storage_iso` -- were written from the schema.
+
+**The inherited pages were not merely incomplete, they were wrong.** Auditing
+the documented arguments against the real schema found `oncreate` documented on
+`proxmox_vm_qemu` although it was removed before rc5, and
+`docs/guides/cloud_init.md` using `storage`, `disk_gb`, `nic`, `bridge`,
+`disk { storage_type }` and `preprovision` throughout -- the flat schema
+`2808e32` removed, again before rc5. Following that guide produces `An argument
+named "disk_gb" is not expected here`, the same failure that makes the
+inherited acceptance tests dead code.
+
+`oncreate` is deleted. The cloud-init guide carries a warning rather than
+rewritten examples: its prose about cloud-init is still sound, but none of its
+configuration has been verified against a live cluster, and replacing wrong
+examples with unverified ones is not an improvement. Rewriting them is
+outstanding work.
+
+Worth repeating the method, since it is cheap and found real errors: dump the
+provider schema with a small program over `Provider().ResourcesMap`, extract
+every argument name the docs mention, and diff. Only compare against *all*
+schema paths, not the top level -- nested block attributes like `cache` and
+`bridge` look bogus otherwise.
 
 ## Conventions
 
