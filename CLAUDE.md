@@ -405,12 +405,24 @@ reason:
   so this window is wide enough to be seen -- most likely right after the
   Proxmox 9 upgrade, when everything restarts at once.
 
-  The acceptance test asserts the sequence rather than hiding it: apply with
-  `ExpectNonEmptyPlan`, then `RefreshState`, then a plan that must be empty.
-  Waiting for the guest to start does **not** make the post-apply plan empty,
-  which is worth knowing before trying it -- the framework plans with
-  `tfexec.Refresh(false)`, comparing the state the apply wrote against the
-  configuration, never against the cluster.
+  **It is not deterministic, so no test asserts it.** Whether the provider
+  reads back `running` or `stopped` depends on which side wins the race in
+  that particular run. Asserting an empty plan fails when the CRM is slow;
+  asserting a non-empty one fails when it is quick. Both were tried, and both
+  failed, on both Proxmox versions.
+
+  Two dead ends worth not repeating. Waiting for the guest to start does not
+  help: the framework plans with `tfexec.Refresh(false)`
+  (`internal/plugintest/working_dir.go`), so it compares the state the apply
+  wrote against the configuration and never consults the cluster. And
+  `ExpectNonEmptyPlan` only moves the flakiness, it does not remove it.
+
+  `TestAccForkVmQemu_HighAvailability` therefore uses `hastate = "ignored"`,
+  which registers the guest with the HA manager without handing it the power
+  switch. That covers what is deterministic -- `hastate` and `hagroup` are
+  written, land on the cluster, and round trip -- and leaves the racy
+  combination documented here rather than pinned by a test that would fail
+  perhaps half the time.
 * **`format = "raw"`** -- 7 of 120 production disks. The test image's `local`
   is a `dir` storage, so qcow2 is the faithful default; raw would want an
   LVM-thin storage adding to the image.
