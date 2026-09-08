@@ -205,6 +205,14 @@ func resourceHaRuleCreate(ctx context.Context, d *schema.ResourceData, meta inte
 		return diag.FromErr(fmt.Errorf("creating HA rule %q: %w", d.Get("rule").(string), err))
 	}
 	d.SetId(d.Get("rule").(string))
+
+	// Release before reading back.  pmParallelBegin is not re-entrant, and
+	// resourceHaRuleRead takes the same lock -- holding it across the call
+	// deadlocks until the test framework's timeout, with no error to show for
+	// it.  unlock() is guarded by its own `locked` flag, so the deferred call
+	// above is a harmless no-op after this.  Same shape as
+	// resource_vm_qemu.go:911.
+	lock.unlock()
 	return resourceHaRuleRead(ctx, d, meta)
 }
 
@@ -276,6 +284,7 @@ func resourceHaRuleUpdate(ctx context.Context, d *schema.ResourceData, meta inte
 	if err := client.Put(params, haRulesPath+"/"+d.Id()); err != nil {
 		return diag.FromErr(fmt.Errorf("updating HA rule %q: %w", d.Id(), err))
 	}
+	lock.unlock() // see the note in resourceHaRuleCreate
 	return resourceHaRuleRead(ctx, d, meta)
 }
 

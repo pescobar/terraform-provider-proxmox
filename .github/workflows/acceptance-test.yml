@@ -173,7 +173,7 @@ jobs:
           PM_USER: root@pam
           PM_PASS: proxmox-acctest
           PM_TLS_INSECURE: 'true'
-        run: make acctest TESTARGS="-v -timeout 60m ${{ inputs.testargs || '-run=TestAccFork' }}"
+        run: make acctest TESTARGS="-v -timeout 45m ${{ inputs.testargs || '-run=TestAccFork' }}"
 
       - name: Collect logs
         if: always()
