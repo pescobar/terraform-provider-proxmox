@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	pxapi "github.com/Telmate/proxmox-api-go/proxmox"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
@@ -332,5 +333,53 @@ func forkCheckHAResource(name, wantGroup string) resource.TestCheckFunc {
 			}
 		}
 		return nil
+	}
+}
+
+// forkWaitVMPowerState polls the cluster until the guest reaches want.
+//
+// An HA managed guest's power state belongs to the HA manager, not to the
+// provider.  With hastate = "started" the CRM starts it on its own cycle,
+// which is after the create has returned and been read back -- so the
+// provider records "stopped", and the next plan wants to set it to "running".
+// That looks exactly like drift and is not: it is two things steering one
+// switch, converging.
+//
+// Waiting here rather than suppressing the plan is deliberate.  Checks run
+// before the framework's post-apply plan (helper/resource/testing_new_config.
+// go), so converging first makes that plan deterministic, while
+// ExpectNonEmptyPlan would hide genuine drift along with this.
+//
+// Worth knowing in production too: a plan run inside that window shows
+// vm_state moving, on every HA managed guest, and it is not a real change.
+func forkWaitVMPowerState(name, want string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		vmID, err := forkVMIDFromState(s, name)
+		if err != nil {
+			return err
+		}
+		client, err := forkAPIClient()
+		if err != nil {
+			return err
+		}
+		vmr := pxapi.NewVmRef(vmID)
+
+		var last string
+		deadline := time.Now().Add(3 * time.Minute)
+		for time.Now().Before(deadline) {
+			state, err := client.GetVmState(vmr)
+			if err == nil {
+				if status, ok := state["status"].(string); ok {
+					last = status
+					if status == want {
+						return nil
+					}
+				}
+			}
+			time.Sleep(3 * time.Second)
+		}
+		return fmt.Errorf(
+			"vm %d never reached power state %q (last seen %q); the HA manager may not be starting it",
+			vmID, want, last)
 	}
 }

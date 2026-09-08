@@ -305,6 +305,11 @@ func TestAccForkVmQemu_HighAvailability(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					forkCheckVMExists(forkVMResource),
 					forkCheckHAResource(forkVMResource, cfg.HAGroup),
+					// The CRM owns this guest's power state and starts it on
+					// its own schedule.  Converge before the framework plans,
+					// or the plan races the HA manager and reports drift that
+					// resolves itself moments later.
+					forkWaitVMPowerState(forkVMResource, "running"),
 					resource.TestCheckResourceAttr(forkVMResource, "hastate", "started"),
 					resource.TestCheckResourceAttr(forkVMResource, "hagroup", cfg.HAGroup),
 				),

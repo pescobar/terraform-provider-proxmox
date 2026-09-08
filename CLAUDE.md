@@ -395,6 +395,15 @@ reason:
   create, an update needing no reboot, and an update requiring one. PXE create
   and both update shapes are covered now; clone is not, and does not appear in
   the state we run.
+* **A plan run while the HA manager is still acting** shows `vm_state`
+  moving on every HA managed guest, and it is not a real change. With
+  `hastate = "started"` the CRM owns the guest's power state and starts it on
+  its own cycle, after the provider has created the guest and read it back --
+  so the provider records `stopped` while the configuration says `running`.
+  It converges on its own. 59 guests in the profiled state set
+  `hastate = "started"` and 65 set `vm_state = "running"`, so this window is
+  wide enough to be seen. The acceptance test waits for convergence rather
+  than suppressing the plan, because suppressing it would hide real drift too.
 * **`format = "raw"`** -- 7 of 120 production disks. The test image's `local`
   is a `dir` storage, so qcow2 is the faithful default; raw would want an
   LVM-thin storage adding to the image.
