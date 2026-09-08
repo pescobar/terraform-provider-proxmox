@@ -169,19 +169,33 @@ func haRuleParams(d *schema.ResourceData, includeRule bool) map[string]interface
 	sort.Strings(sids)
 	params["resources"] = strings.Join(sids, ",")
 
-	if v, ok := d.GetOk("nodes"); ok {
-		if s := haRuleNodesToString(v.(map[string]interface{})); s != "" {
-			params["nodes"] = s
+	// Send only the parameters that belong to this rule's kind.  Proxmox
+	// *returns* affinity on node-affinity rules -- every rule in a real
+	// converted cluster comes back with "positive" -- but it will not accept
+	// it back on one, and answers a bare "400 Parameter verification failed".
+	//
+	// That asymmetry only bites on update: at create time affinity is unset,
+	// so nothing is sent and the call succeeds.  The read then populates it
+	// from the API, and the next update sends it back and fails.  Splitting by
+	// type is what makes the round trip work.
+	switch d.Get("type").(string) {
+	case haRuleTypeNodeAffinity:
+		if v, ok := d.GetOk("nodes"); ok {
+			if s := haRuleNodesToString(v.(map[string]interface{})); s != "" {
+				params["nodes"] = s
+			}
+		}
+		if d.Get("strict").(bool) {
+			params["strict"] = 1
+		}
+	case haRuleTypeResourceAffinity:
+		if v, ok := d.GetOk("affinity"); ok {
+			params["affinity"] = v.(string)
 		}
 	}
-	if v, ok := d.GetOk("affinity"); ok {
-		params["affinity"] = v.(string)
-	}
+
 	if v, ok := d.GetOk("comment"); ok {
 		params["comment"] = v.(string)
-	}
-	if d.Get("strict").(bool) {
-		params["strict"] = 1
 	}
 	if d.Get("disable").(bool) {
 		params["disable"] = 1
