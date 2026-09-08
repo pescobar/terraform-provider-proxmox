@@ -311,6 +311,17 @@ image builds. Once this is merged to `main` the nightly writes a
 default-branch cache that every branch can restore, and the problem goes away;
 until then, prune after a run of stage branches, or run them all on one branch.
 
+**The workflow now prunes superseded images itself**, after a successful save,
+scoped to the matrix leg's own key prefix so the 8.4 job cannot delete the 9.2
+image. It refuses to prune unless the current run's image is actually stored,
+so a run that missed the cache and then failed to build cannot leave the
+repository with no usable image at all. That needs `actions: write`, which is
+why the workflow asks for more than `contents: read`.
+
+Hand pruning should no longer be necessary. The commands above stay because
+they are still the way to inspect usage, and because a branch other than the
+default one can still strand entries the workflow will not see.
+
 This bit us on 2026-08-27 too: four images, 11.27GB, over the limit and
 evicting.
 Check and prune after a run of provisioning changes:

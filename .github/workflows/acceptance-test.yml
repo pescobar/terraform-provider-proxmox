@@ -52,6 +52,8 @@ env:
 
 permissions:
   contents: read
+  # The prune step below deletes superseded image caches through the API.
+  actions: write
 
 jobs:
   acctest:
@@ -157,6 +159,46 @@ jobs:
         with:
           path: ${{ env.IMAGE_PATH }}
           key: ${{ steps.image-cache.outputs.cache-primary-key }}
+
+      # Each edit to the provisioning scripts mints a new cache key and strands
+      # the previous image, which nothing reclaims until GitHub starts evicting
+      # -- and it evicts least-recently-used, so it can take the image still in
+      # use.  Two images at 2-3GB each against a 10GB allowance means a couple
+      # of stranded pairs is all it takes.  This has been pruned by hand three
+      # times; do it here instead.
+      - name: Prune superseded image caches
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREFIX: pve${{ matrix.pve_version }}-image-${{ env.IMAGE_CACHE_EPOCH }}-
+          CURRENT: ${{ steps.image-cache.outputs.cache-primary-key }}
+        run: |
+          set -uo pipefail
+          keys=$(gh api "repos/${{ github.repository }}/actions/caches?per_page=100" \
+                   --jq ".actions_caches[] | select(.key | startswith(\"${PREFIX}\")) | \"\(.id) \(.key)\"") || {
+            echo "could not list caches; skipping prune"; exit 0; }
+
+          # Never prune unless the image for *this* run is actually stored.  A
+          # run that missed the cache and then failed to build has nothing to
+          # supersede the old entries with, and deleting them would leave no
+          # usable image at all.
+          if ! grep -qF " ${CURRENT}" <<<"${keys}"; then
+            echo "current key is not in the cache yet; nothing pruned"
+            echo "${keys}" | sed 's/^/  kept: /'
+            exit 0
+          fi
+
+          # Scoped to this matrix leg's prefix, so the 8.4 job cannot delete
+          # the 9.2 image.
+          while read -r id key; do
+            [ -z "${id:-}" ] && continue
+            [ "${key}" = "${CURRENT}" ] && continue
+            if gh api -X DELETE "repos/${{ github.repository }}/actions/caches/${id}" >/dev/null 2>&1; then
+              echo "pruned superseded cache ${key}"
+            else
+              echo "could not prune ${key} (continuing)"
+            fi
+          done <<<"${keys}"
 
       - name: Start Proxmox VE
         run: ./test/acceptance/scripts/start.sh
