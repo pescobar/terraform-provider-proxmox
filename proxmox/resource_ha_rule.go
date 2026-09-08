@@ -156,9 +156,13 @@ func haRuleNodesFromString(s string) map[string]interface{} {
 
 func haRuleParams(d *schema.ResourceData, includeRule bool) map[string]interface{} {
 	params := map[string]interface{}{}
+	// `type` goes on every request, not only create.  It is the discriminator
+	// that tells Proxmox which parameters to expect, and leaving it off an
+	// update earns a bare "400 Parameter verification failed" with nothing to
+	// say which parameter.  `rule` is create-only: on update it is in the URL.
+	params["type"] = d.Get("type").(string)
 	if includeRule {
 		params["rule"] = d.Get("rule").(string)
-		params["type"] = d.Get("type").(string)
 	}
 
 	res := d.Get("resources").(*schema.Set).List()
@@ -215,8 +219,9 @@ func resourceHaRuleCreate(ctx context.Context, d *schema.ResourceData, meta inte
 		return diag.FromErr(err)
 	}
 
-	if err := client.Post(haRuleParams(d, true), haRulesPath); err != nil {
-		return diag.FromErr(fmt.Errorf("creating HA rule %q: %w", d.Get("rule").(string), err))
+	createParams := haRuleParams(d, true)
+	if err := client.Post(createParams, haRulesPath); err != nil {
+		return diag.FromErr(fmt.Errorf("creating HA rule %q: %w (sent: %v)", d.Get("rule").(string), err, haRuleParamKeys(createParams)))
 	}
 	d.SetId(d.Get("rule").(string))
 
@@ -295,8 +300,29 @@ func resourceHaRuleUpdate(ctx context.Context, d *schema.ResourceData, meta inte
 	if v, ok := d.GetOk("digest"); ok {
 		params["digest"] = v.(string)
 	}
+	// Omitting a parameter does not clear it, it leaves the stored value
+	// alone, so unsetting an optional needs to be said out loud.  Without
+	// this, turning strict back off or emptying a comment silently does
+	// nothing and the next plan shows the same diff for ever.
+	var del []string
+	if d.HasChange("comment") && d.Get("comment").(string) == "" {
+		del = append(del, "comment")
+	}
+	if d.HasChange("strict") && !d.Get("strict").(bool) {
+		del = append(del, "strict")
+	}
+	if d.HasChange("disable") && !d.Get("disable").(bool) {
+		del = append(del, "disable")
+	}
+	if len(del) > 0 {
+		params["delete"] = strings.Join(del, ",")
+	}
 	if err := client.Put(params, haRulesPath+"/"+d.Id()); err != nil {
-		return diag.FromErr(fmt.Errorf("updating HA rule %q: %w", d.Id(), err))
+		// The client returns the HTTP status line and drops the body, so a
+		// rejected parameter arrives as "400 Parameter verification failed"
+		// with no clue which one.  Listing what was sent is the next best
+		// thing, and is what turns this into a five minute diagnosis.
+		return diag.FromErr(fmt.Errorf("updating HA rule %q: %w (sent: %v)", d.Id(), err, haRuleParamKeys(params)))
 	}
 	lock.unlock() // see the note in resourceHaRuleCreate
 	return resourceHaRuleRead(ctx, d, meta)
@@ -340,4 +366,19 @@ func haRuleRequirePVE9(client *pxapi.Client) error {
 			v.Major, v.Minor)
 	}
 	return nil
+}
+
+// haRuleParamKeys renders the parameter names and values of a request for an
+// error message, sorted so two failures are comparable.
+func haRuleParamKeys(params map[string]interface{}) string {
+	keys := make([]string, 0, len(params))
+	for k := range params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%v", k, params[k]))
+	}
+	return strings.Join(parts, " ")
 }
