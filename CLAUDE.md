@@ -400,10 +400,17 @@ reason:
   `hastate = "started"` the CRM owns the guest's power state and starts it on
   its own cycle, after the provider has created the guest and read it back --
   so the provider records `stopped` while the configuration says `running`.
-  It converges on its own. 59 guests in the profiled state set
-  `hastate = "started"` and 65 set `vm_state = "running"`, so this window is
-  wide enough to be seen. The acceptance test waits for convergence rather
-  than suppressing the plan, because suppressing it would hide real drift too.
+  It converges on its own, and a refresh is what settles it. 59 guests in the
+  profiled state set `hastate = "started"` and 65 set `vm_state = "running"`,
+  so this window is wide enough to be seen -- most likely right after the
+  Proxmox 9 upgrade, when everything restarts at once.
+
+  The acceptance test asserts the sequence rather than hiding it: apply with
+  `ExpectNonEmptyPlan`, then `RefreshState`, then a plan that must be empty.
+  Waiting for the guest to start does **not** make the post-apply plan empty,
+  which is worth knowing before trying it -- the framework plans with
+  `tfexec.Refresh(false)`, comparing the state the apply wrote against the
+  configuration, never against the cluster.
 * **`format = "raw"`** -- 7 of 120 production disks. The test image's `local`
   is a `dir` storage, so qcow2 is the faithful default; raw would want an
   LVM-thin storage adding to the image.

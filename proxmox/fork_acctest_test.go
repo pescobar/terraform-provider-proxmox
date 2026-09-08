@@ -345,10 +345,11 @@ func forkCheckHAResource(name, wantGroup string) resource.TestCheckFunc {
 // That looks exactly like drift and is not: it is two things steering one
 // switch, converging.
 //
-// Waiting here rather than suppressing the plan is deliberate.  Checks run
-// before the framework's post-apply plan (helper/resource/testing_new_config.
-// go), so converging first makes that plan deterministic, while
-// ExpectNonEmptyPlan would hide genuine drift along with this.
+// Waiting does not make the post-apply plan empty, and it was a mistake to
+// think it would: that plan runs with tfexec.Refresh(false)
+// (internal/plugintest/working_dir.go), so it compares the state the apply
+// wrote against the configuration and never looks at the cluster.  What the
+// wait buys is a settled cluster for the following RefreshState step to read.
 //
 // Worth knowing in production too: a plan run inside that window shows
 // vm_state moving, on every HA managed guest, and it is not a real change.

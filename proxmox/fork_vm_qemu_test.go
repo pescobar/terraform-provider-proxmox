@@ -314,20 +314,37 @@ func TestAccForkVmQemu_HighAvailability(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					forkCheckVMExists(forkVMResource),
 					forkCheckHAResource(forkVMResource, cfg.HAGroup),
-					// The CRM owns this guest's power state and starts it on
-					// its own schedule.  Converge before the framework plans,
-					// or the plan races the HA manager and reports drift that
-					// resolves itself moments later.
+					// Wait for the CRM to finish starting the guest, so the
+					// refresh in the next step has something settled to read.
 					forkWaitVMPowerState(forkVMResource, "running"),
 					resource.TestCheckResourceAttr(forkVMResource, "hastate", "started"),
+					// cfg.HAGroup is "" on Proxmox 9, where the attribute is
+					// unusable, so this asserts its absence there.
 					resource.TestCheckResourceAttr(forkVMResource, "hagroup", cfg.HAGroup),
 				),
-				// cfg.HAGroup is "" on Proxmox 9, so the assertion above
-				// checks the attribute is absent there, which is the point.
+				// The plan straight after this apply is legitimately not
+				// empty, and no amount of waiting changes that: the framework
+				// plans with tfexec.Refresh(false) (plugintest/working_dir.go),
+				// so it compares the state the apply wrote against the
+				// configuration, never against the cluster.  The apply
+				// recorded vm_state = "stopped" because the CRM had not yet
+				// started the guest when the provider read it back.
+				//
+				// This is real behaviour, not a test artifact.  Anyone
+				// planning in that window sees the same thing on every HA
+				// managed guest.  Assert it rather than hide it.
+				ExpectNonEmptyPlan: true,
 			},
 			{
-				// The regression net: if the read path does not repopulate
-				// hastate and hagroup, this is where it shows.
+				// Refresh reads the cluster, where the guest is running by
+				// now, and reconciles vm_state.
+				RefreshState: true,
+			},
+			{
+				// And now the plan must be empty.  This is the real
+				// regression net: it proves hastate, hagroup and the rest
+				// round trip, and that the earlier diff was convergence
+				// rather than drift.
 				Config:   cfg.hcl(),
 				PlanOnly: true,
 			},
