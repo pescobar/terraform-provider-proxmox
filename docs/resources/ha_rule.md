@@ -127,6 +127,75 @@ $ tofu import proxmox_ha_rule.ha_bal ha-rule-6e12c05d-c269
 
 This needs a matching `resource` block to exist first, or the import fails.
 
+### Turning imported state back into configuration
+
+`tofu import` writes state but no configuration, so after a CLI import the
+resource exists in state with an empty or guessed block beside it. `tofu state
+show` prints what was actually imported, which is the shortest route to a
+matching block:
+
+```console
+$ tofu state show proxmox_ha_rule.ha_bal
+# proxmox_ha_rule.ha_bal:
+resource "proxmox_ha_rule" "ha_bal" {
+    affinity  = "positive"
+    comment   = "ha-bal"
+    digest    = "7f816441083a8a6f64a037dfd478137e64003702"
+    disable   = false
+    id        = "ha-rule-6e12c05d-c269"
+    nodes     = {
+        "pve-dev01" = 1
+        "pve-dev02" = 1
+        "pve-dev03" = 1
+    }
+    order     = 1
+    resources = [
+        "vm:601",
+        "vm:602",
+        "vm:604",
+        "vm:606",
+    ]
+    rule      = "ha-rule-6e12c05d-c269"
+    strict    = false
+    type      = "node-affinity"
+}
+```
+
+**The output is not valid configuration as it stands.** It includes attributes
+that are read-only, and OpenTofu rejects a configuration that sets them:
+
+| Attribute | Why it has to go            |
+| --------- | --------------------------- |
+| `id`      | assigned by OpenTofu        |
+| `digest`  | computed, reported by Proxmox |
+| `order`   | computed, assigned by Proxmox |
+
+So dump it and strip those three:
+
+```console
+$ tofu state show proxmox_ha_rule.ha_bal \
+    | grep -vE '^\s*(id|digest|order)\s*=' \
+    | grep -v '^#' > ha_rules.tf
+```
+
+Then `tofu plan` must report **no changes**. If it wants to alter the rule, the
+block is not yet a faithful copy of what is on the cluster — compare it against
+`tofu state show` again rather than guessing.
+
+Two things worth checking in the dumped block before keeping it:
+
+* **`resources` is a literal list**, so nothing ties the rule to the guests. See
+  [Every referenced guest must already be HA managed](#every-referenced-guest-must-already-be-ha-managed)
+  below: referencing the guest resources instead makes OpenTofu order them, and
+  is usually what you want.
+* **Stale sids come across too.** `vm:606` in the example above is referenced by
+  the rule but may no longer be an HA resource; importing it faithfully
+  reproduces a rule that cannot be written until it is dealt with.
+
+For a rule you have not imported yet, `-generate-config-out` does all of this
+for you and is the better route; `tofu state show` is the fallback once a CLI
+import has already happened.
+
 ### After importing
 
 Run `tofu plan` and expect **no changes**. A diff means the configuration and
