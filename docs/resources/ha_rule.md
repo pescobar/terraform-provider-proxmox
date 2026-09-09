@@ -50,6 +50,10 @@ resource "proxmox_ha_rule" "keep_apart" {
 }
 ```
 
+A worked configuration with several guests and three rules built from a
+`locals` list is in
+[examples/ha-rule-with-guests](../../examples/ha-rule-with-guests).
+
 ## Argument Reference
 
 | Argument    | Type           | Required | Description                                                                                                     |
