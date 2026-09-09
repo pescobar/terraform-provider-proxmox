@@ -294,12 +294,27 @@ func resourceHaRuleUpdate(ctx context.Context, d *schema.ResourceData, meta inte
 	client := pconf.Client
 
 	params := haRuleParams(d, false)
-	// Optimistic locking: the digest covers the whole rules file, so passing
-	// the one we last read makes Proxmox refuse the write if anything else
-	// changed a rule in the meantime.
-	if v, ok := d.GetOk("digest"); ok {
-		params["digest"] = v.(string)
-	}
+
+	// The digest is deliberately NOT sent, although it is read into state.
+	//
+	// It is a checksum of the entire rules file rather than of one rule --
+	// every rule on a cluster reports the same value -- and Terraform reads it
+	// during refresh, then writes during apply, without re-reading in between.
+	// Anything that touches the file in that window invalidates it, and
+	// Proxmox rejects the write with "detected modified configuration - file
+	// changed by other user? Try again."
+	//
+	// Two ordinary situations hit that. Destroying a guest makes Proxmox strip
+	// its sid from any rule referencing it, which rewrites the file before we
+	// get there. And updating two rules in one apply makes the first update
+	// invalidate the second's digest, so managing more than one rule would
+	// fail roughly whenever both changed.
+	//
+	// Sending a digest read at refresh time is not optimistic locking, it is a
+	// guess about a value we have not checked. Terraform's model is that it
+	// owns what it manages, so last write wins is the honest behaviour here.
+	// Genuine concurrent-edit protection would need a re-read immediately
+	// before the write, which would defeat the point of the check anyway.
 	// Omitting a parameter does not clear it, it leaves the stored value
 	// alone, so unsetting an optional needs to be said out loud.  Without
 	// this, turning strict back off or emptying a comment silently does

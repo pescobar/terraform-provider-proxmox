@@ -89,6 +89,19 @@ func TestAccForkHaRule(t *testing.T) {
 					resource.TestCheckResourceAttr(forkHaRuleResource, "strict", "true"),
 				),
 			},
+			{
+				// A second update straight after the first, without an
+				// intervening refresh.  This is the shape that fails when the
+				// digest is sent: the previous write changed the file-wide
+				// checksum, so the value still in state is stale and Proxmox
+				// answers "detected modified configuration - file changed by
+				// other user? Try again."
+				Config: forkHaRuleHCL(vm, name, "managed-by-tofu-again", false),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(forkHaRuleResource, "comment", "managed-by-tofu-again"),
+					resource.TestCheckResourceAttr(forkHaRuleResource, "strict", "false"),
+				),
+			},
 		},
 	})
 }

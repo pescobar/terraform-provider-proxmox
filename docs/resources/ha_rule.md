@@ -68,7 +68,7 @@ resource "proxmox_ha_rule" "keep_apart" {
 | Attribute | Type     | Description                                                                                     |
 | --------- | -------- | ----------------------------------------------------------------------------------------------- |
 | `order`   | `number` | Evaluation order, assigned by Proxmox.                                                            |
-| `digest`  | `string` | Checksum of the whole rules configuration, used for optimistic locking. Shared by every rule, not per rule. |
+| `digest`  | `string` | Checksum of the whole rules configuration. Shared by every rule rather than being per-rule, and **not** sent on update -- see the note below. |
 
 ## Importing rules created by a Proxmox 8 → 9 upgrade
 
@@ -108,3 +108,24 @@ resource comes back with **no group at all**, and Proxmox 9 refuses to set one:
 So a configuration that still sets `hagroup` on `proxmox_vm_qemu` fails to
 apply after the upgrade. Remove `hagroup` before the first apply; keep
 `hastate`, which is unaffected.
+
+## Concurrent modification
+
+Proxmox stores every HA rule in one file and reports a single `digest` over all
+of them. Passing that digest back on a write makes Proxmox reject the write if
+anything changed the file in the meantime.
+
+This provider reads `digest` but does not send it, because in Terraform's
+execution model the value is always potentially stale: it is read during
+refresh and would be written during apply, with no re-read in between. Two
+routine situations invalidate it —
+
+* **destroying a guest**, because Proxmox strips its sid from any rule that
+  references it, rewriting the file before Terraform updates the rule;
+* **updating two rules in one apply**, because the first write changes the
+  digest the second is holding.
+
+The practical consequence is last-write-wins: if something outside Terraform
+edits a rule between refresh and apply, that edit is overwritten rather than
+reported. Given Terraform assumes ownership of what it manages, that is the
+behaviour that lets ordinary applies succeed.
