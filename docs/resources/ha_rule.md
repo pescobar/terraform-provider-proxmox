@@ -70,21 +70,38 @@ resource "proxmox_ha_rule" "keep_apart" {
 | `order`   | `number` | Evaluation order, assigned by Proxmox.                                                            |
 | `digest`  | `string` | Checksum of the whole rules configuration. Shared by every rule rather than being per-rule, and **not** sent on update -- see the note below. |
 
-## Importing rules created by a Proxmox 8 → 9 upgrade
+## Importing
 
-The import id is the rule identifier. **The upgrade does not reuse the group's
-name for it** — it generates one, and leaves the old group name in `comment`:
+The import id is the rule identifier — the `rule` argument, not the resource
+label.
+
+### Finding the identifiers
+
+An 8 → 9 upgrade converts each HA group into a rule but **does not reuse the
+group's name**. It generates one and leaves the old name in `comment`:
 
 ```console
 $ curl -sSk -H "Authorization: PVEAPIToken=$TOK" \
       "$PVE/cluster/ha/rules" | jq -r '.data[] | "\(.comment)\t\(.rule)"'
 ha-bal              ha-rule-6e12c05d-c269
 ha-prefer-node03    ha-rule-a53e0543-61b7
+ha-prefer-node01    ha-rule-6ffa5f74-87f6
 ```
 
-Those identifiers are minted during the upgrade, so they differ per cluster: the
-ones from a rehearsal are not the ones production will get. Read them off the
-cluster after upgrading rather than writing them in advance.
+or on a node directly:
+
+```console
+$ pvesh get /cluster/ha/rules --output-format json | jq -r '.[] | "\(.comment)\t\(.rule)"'
+```
+
+Those identifiers are minted during the upgrade, so **they differ per cluster**:
+the ones from a rehearsal are not the ones production will get. Read them off
+each cluster after upgrading rather than writing them in advance.
+
+### Importing with a config-driven import block
+
+Preferred, because OpenTofu writes the configuration for you and you review it
+before anything is applied.
 
 ```hcl
 import {
@@ -93,8 +110,64 @@ import {
 }
 ```
 
-Then `tofu plan -generate-config-out=ha_rules.tf` writes matching resource
-blocks to review, or use `tofu import proxmox_ha_rule.ha_bal ha-rule-6e12c05d-c269`.
+```console
+$ tofu plan -generate-config-out=ha_rules.tf
+$ # review ha_rules.tf, then
+$ tofu apply
+```
+
+The generated block contains the rule exactly as the cluster has it, including
+the `nodes` priorities the original group carried and the `resources` list.
+
+### Importing with the CLI
+
+```console
+$ tofu import proxmox_ha_rule.ha_bal ha-rule-6e12c05d-c269
+```
+
+This needs a matching `resource` block to exist first, or the import fails.
+
+### After importing
+
+Run `tofu plan` and expect **no changes**. A diff means the configuration and
+the cluster disagree, and the usual causes are:
+
+* `resources` written in a different order — harmless, it is a set, and no diff
+  should appear; if one does, the order is not the cause;
+* `nodes` priorities omitted — a converted group keeps its weightings, so
+  `pve-node01 = 5` has to be in the configuration too;
+* `affinity` omitted — Proxmox reports `positive` on node-affinity rules as
+  well as resource-affinity ones, so leave it unset and let it stay computed
+  rather than guessing a value.
+
+### Every referenced guest must already be HA managed
+
+Proxmox validates the whole `resources` list on every write, not just the
+entries that changed:
+
+```
+500 update HA rules failed: cannot use unmanaged resource(s) vm:608
+```
+
+A guest is HA managed when it has `hastate` set — see `hastate` on
+[proxmox_vm_qemu](vm_qemu.md). Two consequences worth knowing before importing:
+
+* a guest you add to a rule needs `hastate` **first**, so reference the guest
+  resource in `resources` and let Terraform order them;
+* a rule that already references a guest which has since become unmanaged
+  cannot be written **at all** until that sid is removed or the guest is
+  managed again — including writes that have nothing to do with that guest.
+
+Check for stale references before importing:
+
+```console
+$ comm -13 \
+    <(curl -sSk "${auth[@]}" "$PVE/cluster/ha/resources" | jq -r '.data[].sid' | sort) \
+    <(curl -sSk "${auth[@]}" "$PVE/cluster/ha/rules" | jq -r '.data[].resources' | tr ',' '\n' | sort -u)
+```
+
+Anything printed is referenced by a rule but not HA managed, and will block
+updates to whichever rule holds it.
 
 ## Notes on migrating from HA groups
 

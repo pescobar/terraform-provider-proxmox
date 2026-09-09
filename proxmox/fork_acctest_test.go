@@ -191,6 +191,9 @@ func forkCheckVMIDUnchanged(name string, want *int) resource.TestCheckFunc {
 // forkVM describes the VM shape the tests exercise.  The zero value is not
 // useful; start from forkBaseVM().
 type forkVM struct {
+	// Terraform resource label, so a configuration can declare more than one.
+	ResourceName string
+
 	Name     string
 	Cores    int
 	Memory   int
@@ -217,22 +220,27 @@ type forkVM struct {
 // exists and is running.
 func forkBaseVM(name string) forkVM {
 	return forkVM{
-		Name:     name,
-		Cores:    2,
-		Memory:   2048,
-		Balloon:  2048,
-		Tags:     "acctest;base",
-		VMState:  "running",
-		DiskSize: "8G",
-		Format:   "qcow2",
+		ResourceName: "test",
+		Name:         name,
+		Cores:        2,
+		Memory:       2048,
+		Balloon:      2048,
+		Tags:         "acctest;base",
+		VMState:      "running",
+		DiskSize:     "8G",
+		Format:       "qcow2",
 	}
 }
 
 func (v forkVM) hcl() string {
 	var b strings.Builder
 
+	label := v.ResourceName
+	if label == "" {
+		label = "test"
+	}
 	fmt.Fprintf(&b, `
-resource "proxmox_vm_qemu" "test" {
+resource "proxmox_vm_qemu" %q {
   name        = %q
   target_node = %q
 
@@ -263,7 +271,7 @@ resource "proxmox_vm_qemu" "test" {
   vm_state   = %q
   tags       = %q
   protection = %t
-`, v.Name, forkNode(), v.Cores, v.Memory, v.Balloon, v.VMState, v.Tags, v.Protection)
+`, label, v.Name, forkNode(), v.Cores, v.Memory, v.Balloon, v.VMState, v.Tags, v.Protection)
 
 	b.WriteString("\n  disks {\n    virtio {\n      virtio0 {\n        disk {\n")
 	fmt.Fprintf(&b, "          storage  = %q\n", forkStorage())
