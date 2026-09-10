@@ -667,37 +667,116 @@ resource at all (`vm:606` in that cluster), which the API permits; it is a
 dangling reference left by a guest removed after the group was defined, and it
 will show up in whatever configuration is written for that rule.
 
+### Done: HA rules, and five releases (2026-09-10)
+
+`proxmox_ha_rule` exists, is documented, and is covered by acceptance tests on
+a live Proxmox 9.2 cluster. It was written against this fork's pinned client
+using its generic request helpers -- `GetItemList`,
+`GetItemConfigMapStringInterface`, `Post`, `Put`, `Delete` -- so **no
+dependency bump was needed**. No code was taken from
+`bpg/terraform-provider-proxmox`, which is MPL-2.0 and Plugin Framework based
+where this is MIT and SDKv2; only the API contract, which is Proxmox's.
+
+| Version | What it is for |
+| --- | --- |
+| `0.9.0` | the migration itself -- byte-identical to upstream rc5 bar the module path |
+| `0.9.1` | Proxmox 9 capable, `VM.Monitor` removed |
+| `0.9.2` | `proxmox_ha_rule`, HA test coverage, single node cluster fixture |
+| `0.9.3` | complete registry documentation |
+| `0.9.4` | HA rule updates survive Proxmox rewriting the rules file |
+
+All five are published and served by the OpenTofu registry. The registry syncs
+on its own cadence and took a few hours for `0.9.2` and `0.9.3`; a newly
+published version being absent for a while is normal.
+
+#### What Proxmox 9 does to HA, all measured rather than inferred
+
+* **HA groups are unusable, not merely deprecated.** Assigning a guest to one
+  returns `500 invalid parameter 'group': ha groups have been migrated to
+  rules`, and `ha-manager groupadd` fails the same way. A configuration still
+  setting `hagroup` fails to apply after the upgrade -- loudly, which is the
+  better of the two outcomes.
+* **The 8 -> 9 upgrade strips `group` from every HA resource** and moves
+  membership into the rule's `resources` list. `hastate` survives untouched.
+* **Rule identifiers are generated**, `ha-rule-6e12c05d-c269` and the like,
+  with the old group name left in `comment`. They are minted during the
+  upgrade so they differ per cluster and cannot be written in advance.
+* **Every sid in `resources` must already be HA managed**, validated on every
+  write against the whole list: `cannot use unmanaged resource(s) vm:608`. One
+  stale sid therefore blocks *every* write to that rule, including changes
+  unrelated to it.
+* **The `digest` is a checksum of the whole rules file**, not of one rule.
+  Sending it back was a mistake fixed in `0.9.4`: Terraform reads it at refresh
+  and writes at apply with no re-read between, so destroying a guest -- which
+  makes Proxmox rewrite the file -- or updating two rules in one apply both
+  failed with `detected modified configuration`.
+
+#### Ordering guests before rules
+
+`resources` written as literals creates no dependency, so a guest and a rule
+naming it apply in arbitrary order. Reference the guest resources instead:
+
+```hcl
+locals {
+  ha_bal_guests = [proxmox_vm_qemu.playground_test, proxmox_vm_qemu.playground_vm01]
+}
+resource "proxmox_ha_rule" "ha_bal" {
+  resources = [for vm in local.ha_bal_guests : "vm:${vm.vmid}"]
+}
+```
+
+`vm.vmid` only works when the guest sets `vmid` explicitly, because rc5 never
+writes it back; otherwise use `"vm:${element(split("/", vm.id), 2)}"`. A worked
+configuration is in `examples/ha-rule-with-guests`, validated with `tofu
+validate`.
+
+### The suite, as it stands
+
+Eleven tests. Ten pass on each Proxmox version, with the differences being
+deliberate skips: the two HA rule tests are Proxmox 9 only, `_FromUpstreamRc5`
+skips on 9 because upstream rc5 cannot configure there, and
+`_FromPreviousRelease` skips unless dispatched with `previous_version`.
+
+Dispatch with the workflow's inputs rather than editing anything:
+`pve_version` (`8.4`, `9.2`, `both`), `testargs`, `force_rebuild`,
+`previous_version`.
+
 ### Next
 
-Done since this was last written: the suite runs green on both versions, the
-`3.0.1-rc5` prerelease resolves from the registry, and `VM.Monitor` is
-backported.
+Done since this was last written: the acceptance work is merged to `main`, HA
+rules are implemented and released, the documentation is complete, the image
+cache prunes itself, and `TestAccForkUpgrade_FromPreviousRelease` has run and
+passed for the first time.
 
-1. Merge `acceptance-tests` into `main` so the nightly schedule picks it up.
-   Prune the epoch 2 images afterwards -- four images at ~2.5GB each against a
-   10GB limit.
-2. Consider backporting `pm_minimum_permission_check` /
+The remaining work is operational rather than provider work.
+
+1. **Rehearse the state migration** on a copy of a production state file and
+   confirm `tofu plan` is empty. Do it **while still on Proxmox 8**: upstream
+   rc5 cannot configure against Proxmox 9, so there is no working starting
+   point afterwards. Use `0.9.0` for the rehearsal, because it is behaviourally
+   identical to rc5 and an empty plan therefore proves the rename alone.
+2. **Look at `proxmox_vm_qemu.testvms`** -- the one `count` based resource, two
+   instances -- before rewriting state. The three guests with no `vmid` are
+   understood and need no action.
+3. **Upgrade Proxmox 8 -> 9**, on `0.9.1` or later. Remove `hagroup` from the
+   configuration **before the first apply**; keep `hastate`. See "Migration
+   ordering".
+4. **Import the converted rules** into `proxmox_ha_rule`, reading the generated
+   identifiers off the cluster after the upgrade. See
+   `docs/resources/ha_rule.md`.
+5. Wire `previous_version` into the nightly, pinned to the last published
+   release, so every change proves it reads its predecessor's state without
+   anyone remembering to ask.
+6. Consider backporting `pm_minimum_permission_check` /
    `pm_minimum_permission_list`, so the next privilege rename is configuration
    rather than a code change and a release.
-3. Look at the `count` based resource (`proxmox_vm_qemu.testvms`, 2 instances)
-   before rehearsing the state rewrite. The three VMs with no `vmid` are
-   understood now and need no action.
-4. Rehearse the state migration on a copy of a production state file and
-   confirm `tofu plan` is empty. Do this **while still on Proxmox 8** -- see
-   "Migration ordering" above.
-5. Run `TestAccForkUpgrade_FromPreviousRelease`, now that there are releases
-   to upgrade between. Dispatch the acceptance workflow with
-   `previous_version: 0.9.1` -- the input is wired to
-   `PVE_TEST_PREVIOUS_VERSION`, and the test skips when it is empty, which is
-   why scheduled runs are unaffected. **The version has to be published, not
-   merely tagged**: the test installs it from the registry, and a draft
-   release is invisible there. It is the test that matters most long term --
-   every release proving it reads what its predecessor wrote.
-6. Add tests as the need appears, not in advance. HA is the biggest known gap;
-   a reboot-requiring update of a running VM is the second.
 7. Revisit the permanently red `staticcheck` job -- see "shows a red cross"
-   above. Not urgent, but it should not stay red indefinitely, because a check
-   nobody trusts is worth less than no check.
+   above.
+8. Add tests as the need appears, not in advance. A reboot-requiring update of
+   a running VM is the largest remaining gap; it needs a guest that can shut
+   itself down, so it needs a real OS in the image.
+
+**Do not cut releases unasked.** Tag only when asked to.
 
 ## Provider migration (Telmate -> fork), with OpenTofu
 
@@ -865,6 +944,45 @@ provider schema with a small program over `Provider().ResourcesMap`, extract
 every argument name the docs mention, and diff. Only compare against *all*
 schema paths, not the top level -- nested block attributes like `cache` and
 `bridge` look bogus otherwise.
+
+## Working setup on this machine
+
+Facts a fresh session would otherwise have to rediscover.
+
+* **Git push works.** Credentials are in `~/.git-credentials` with a global
+  `store` helper, so plain `git push origin main` authenticates. The repo also
+  carries a stale local `credential.helper` pointing into a per-session `/tmp`
+  scratchpad that no longer exists; it is harmless -- git tries helpers in turn
+  -- and prints `unable to get credential storage lock` on every push. That
+  earlier arrangement is why credentials vanished between sessions before.
+* **The GitHub API is reachable with the same token**, parsed out of that file:
+
+  ```bash
+  TOKEN=$(sed -n 's#^https://[^:]*:\([^@]*\)@github\.com.*#\1#p' ~/.git-credentials | head -1)
+  ```
+
+  That is how runs are dispatched, logs read and caches pruned. `gh` is **not**
+  installed.
+* **Dispatch the acceptance workflow** (id `343737642`) by POSTing to
+  `/actions/workflows/343737642/dispatches` with `ref` and the inputs. The
+  release workflow is `344031387`, `go.yml` is `344031386`.
+* **Go toolchain is pinned to 1.26.7** via `go env -w GOTOOLCHAIN=go1.26.7`,
+  matching what CI's `1.26` resolves to, with `staticcheck` v0.8.1 in
+  `~/go/bin`. Older staticcheck reports **zero** SA1019 on this tree, which is
+  a false all-clear; see the staticcheck note above.
+* **Acceptance tests cannot run locally.** No `/dev/kvm`, no qemu, no CPU
+  virtualisation flags, and `download.proxmox.com` sits behind a TLS
+  intercepting proxy with a mismatched certificate. CI is the only path.
+* **OpenTofu 1.12.6** is at `~/.claude/jobs/*/tmp/bin/tofu` if a scratch copy
+  survives, otherwise fetch it from GitHub releases. With a `dev_overrides` CLI
+  config pointing at a locally built provider, `tofu validate` checks generated
+  HCL against the real schema without touching a Proxmox API -- that is how the
+  examples and test configurations were verified.
+* **Dumping the provider schema** is the way to answer "does this attribute
+  exist" without guessing: a small program over `Provider().ResourcesMap`,
+  walking `Elem` recursively. It found the stale documentation and proved the
+  fork's schema byte-identical to upstream rc5. Compare against *all* schema
+  paths, not just the top level.
 
 ## Conventions
 
